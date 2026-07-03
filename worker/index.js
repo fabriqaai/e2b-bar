@@ -48,11 +48,11 @@ function renderPage() {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>E2BBar - E2B sandboxes in your macOS menu bar</title>
-    <meta name="description" content="A tiny open-source macOS menu bar app for watching E2B sandboxes, lifecycle events, inline metrics, logs, files, processes, ports, and network controls." />
+    <meta name="description" content="Open-source macOS menu bar app for monitoring E2B sandboxes with metrics, logs, lifecycle events, files, processes, ports, and safe actions." />
     <meta name="theme-color" content="#f7f5ef" />
     <link rel="canonical" href="https://e2b.bar/" />
     <meta property="og:title" content="E2BBar" />
-    <meta property="og:description" content="E2B sandboxes in your macOS menu bar." />
+    <meta property="og:description" content="Open-source E2B sandbox monitoring for your macOS menu bar." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://e2b.bar/" />
     <meta property="og:image" content="${SCREENSHOT_URL}" />
@@ -79,13 +79,13 @@ function renderPage() {
       <section class="hero">
         <div class="copy">
           <p class="eyebrow">Open-source macOS menu bar app</p>
-          <h1>E2B sandboxes, without opening another tab.</h1>
-          <p class="dek">E2BBar sits in your menu bar and shows running and paused sandboxes, lifecycle updates, inline metrics, expiration timing, searchable logs, file/process tools, and quick port links.</p>
+          <h1>E2B sandboxes in your menu bar.</h1>
+          <p class="dek">Add your E2B API key once, then watch running and paused sandboxes from macOS: metrics, logs, lifecycle events, expiration alerts, port links, files, processes, and safe actions.</p>
           <div class="actions">
-            <a class="button primary" href="/download">Download latest DMG</a>
+            <a class="button primary" href="/download">Download latest version</a>
             <a class="button secondary" href="/github">View source</a>
           </div>
-          <p class="fine">macOS 14+ - free and open source - GitHub Releases</p>
+          <p class="fine">macOS 14+ - open source - releases on GitHub</p>
         </div>
 
         <figure class="screenshot-frame" aria-label="E2BBar running on macOS">
@@ -96,36 +96,46 @@ function renderPage() {
       <section class="features" aria-label="Features">
         <article>
           <span>01</span>
-          <h2>Watch live sandboxes</h2>
-          <p>Filter running or paused sandboxes, watch lifecycle events, see CPU/memory/disk badges, and notice expiring work before it disappears.</p>
+          <h2>Connect your E2B key</h2>
+          <p>Paste an API key from the E2B dashboard. E2BBar stores it locally in Keychain and starts listing your sandboxes.</p>
         </article>
         <article>
           <span>02</span>
-          <h2>Logs without the tab</h2>
-          <p>Open searchable logs plus a sandbox inspector for files, process lists, shell commands, port URLs, and network controls.</p>
+          <h2>Monitor from macOS</h2>
+          <p>See state, CPU, memory, disk, TTL, logs, lifecycle events, and expiration alerts without keeping the dashboard open.</p>
         </article>
         <article>
           <span>03</span>
-          <h2>Small on purpose</h2>
-          <p>Keychain storage, hidden destructive actions, team usage, and GitHub release updates without becoming a dashboard clone.</p>
+          <h2>Use quick tools</h2>
+          <p>Open port URLs, inspect files and processes, edit network rules, extend TTLs, and keep destructive actions hidden until enabled.</p>
         </article>
       </section>
 
       <section class="download">
         <div>
-          <p class="eyebrow">Distribution</p>
-          <h2>Latest DMG is always one URL.</h2>
-          <p>Use the direct download for the newest build, or browse older GitHub releases when you need a specific version.</p>
+          <p class="eyebrow">Download</p>
+          <h2>Install the latest E2BBar.</h2>
+          <p>Get the newest signed macOS build, browse older versions, or inspect the code on GitHub.</p>
         </div>
         <div class="download-actions">
-          <a class="button primary" href="/download">Latest DMG</a>
+          <a class="button primary" href="/download">Download latest version</a>
           <a class="button secondary" href="/releases">Previous releases</a>
+          <a class="button secondary" href="/github">Source code</a>
         </div>
       </section>
     </main>
 
     <footer>
       <span>E2BBar</span>
+      <a class="fabriqa-link" href="https://fabriqa.ai" target="_blank" rel="noreferrer">
+        <svg viewBox="0 0 64 65" width="18" height="18" aria-hidden="true">
+          <rect x="0" y="0" width="64" height="11" rx="6" fill="#b8572d"></rect>
+          <rect x="0" y="18" width="49.49" height="11" rx="6" fill="currentColor"></rect>
+          <rect x="0" y="36" width="34.99" height="11" rx="6" fill="currentColor"></rect>
+          <rect x="0" y="54" width="20.48" height="11" rx="6" fill="currentColor"></rect>
+        </svg>
+        fabriqa.ai
+      </a>
       <a href="https://e2b.dev">E2B</a>
       <a href="/github">GitHub</a>
       <a href="/releases">Releases</a>
@@ -141,7 +151,7 @@ function schema() {
     name: "E2BBar",
     applicationCategory: "DeveloperApplication",
     operatingSystem: "macOS 14+",
-    description: "A macOS menu bar app for watching E2B sandboxes, lifecycle events, inline metrics, logs, files, processes, ports, and network controls.",
+    description: "Open-source macOS menu bar app for monitoring E2B sandboxes with metrics, logs, lifecycle events, files, processes, ports, and safe actions.",
     url: "https://e2b.bar",
     image: SCREENSHOT_URL,
     downloadUrl: LATEST_DMG_URL,
@@ -165,12 +175,14 @@ function styles() {
   --amber: #d8872e;
   --white: #fffdf7;
   --shadow: 0 22px 70px rgba(53, 45, 28, .18);
+  --shell: min(1540px, calc(100% - clamp(32px, 6vw, 96px)));
 }
 * { box-sizing: border-box; }
 html { background: var(--paper); }
 body {
   margin: 0;
   min-height: 100vh;
+  overflow-x: clip;
   color: var(--ink);
   background:
     linear-gradient(90deg, rgba(23,20,15,.04) 1px, transparent 1px) 0 0 / 72px 72px,
@@ -193,7 +205,7 @@ a { color: inherit; text-decoration: none; }
 .masthead {
   position: relative;
   z-index: 2;
-  width: min(1180px, calc(100% - 40px));
+  width: var(--shell);
   margin: 0 auto;
   padding: 24px 0 18px;
   display: flex;
@@ -221,16 +233,22 @@ nav .nav-button:hover { color: var(--white); background: var(--green-deep); }
 main {
   position: relative;
   z-index: 1;
-  width: min(1180px, calc(100% - 40px));
+  width: var(--shell);
   margin: 0 auto;
 }
 .hero {
-  min-height: min(760px, calc(100vh - 88px));
+  min-height: min(780px, calc(100vh - 88px));
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 520px);
-  gap: clamp(32px, 6vw, 88px);
+  grid-template-columns: minmax(390px, .78fr) minmax(520px, 1.22fr);
+  gap: clamp(28px, 4vw, 72px);
   align-items: center;
-  padding: clamp(46px, 7vw, 92px) 0;
+  padding: clamp(42px, 6vh, 76px) 0 clamp(50px, 7vh, 88px);
+}
+.copy {
+  position: relative;
+  z-index: 2;
+  min-width: 0;
+  max-width: 600px;
 }
 .eyebrow {
   margin: 0 0 18px;
@@ -242,16 +260,16 @@ main {
 }
 h1, h2, p { margin: 0; }
 h1 {
-  max-width: 760px;
-  font-size: clamp(48px, 8vw, 106px);
-  line-height: .88;
+  max-width: 10ch;
+  font-size: clamp(52px, 5.8vw, 104px);
+  line-height: .92;
   letter-spacing: 0;
 }
 .dek {
-  max-width: 650px;
-  margin-top: 28px;
+  max-width: 560px;
+  margin-top: clamp(20px, 2.2vw, 28px);
   color: var(--muted);
-  font-size: clamp(18px, 1.4vw, 22px);
+  font-size: clamp(17px, 1.15vw, 21px);
   line-height: 1.5;
 }
 .actions, .download-actions {
@@ -285,8 +303,9 @@ h1 {
 }
 .screenshot-frame {
   margin: 0;
-  width: min(54vw, 760px);
-  transform: rotate(1.2deg);
+  width: 100%;
+  max-width: 920px;
+  transform: rotate(.7deg);
   filter: drop-shadow(var(--shadow));
   justify-self: end;
 }
@@ -340,7 +359,7 @@ h1 {
 footer {
   position: relative;
   z-index: 1;
-  width: min(1180px, calc(100% - 40px));
+  width: var(--shell);
   margin: 0 auto;
   padding: 24px 0 42px;
   display: flex;
@@ -350,11 +369,22 @@ footer {
 }
 footer span { color: var(--ink); font-weight: 760; margin-right: auto; }
 footer a:hover { color: var(--ink); }
-@media (max-width: 860px) {
+.fabriqa-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.fabriqa-link svg {
+  color: var(--ink);
+  flex: 0 0 auto;
+}
+@media (max-width: 1120px) {
   .masthead { align-items: flex-start; gap: 18px; }
   nav { flex-wrap: wrap; justify-content: flex-end; }
   .hero { grid-template-columns: 1fr; min-height: auto; }
-  .screenshot-frame { width: 100%; transform: none; justify-self: stretch; }
+  .copy { max-width: 760px; }
+  h1 { max-width: 11ch; }
+  .screenshot-frame { width: 100%; max-width: none; transform: none; justify-self: stretch; }
   .features { grid-template-columns: 1fr; }
   .download { grid-template-columns: 1fr; padding: 28px; }
 }
@@ -362,7 +392,7 @@ footer a:hover { color: var(--ink); }
   .masthead, main, footer { width: min(100% - 24px, 1180px); }
   .masthead { flex-direction: column; }
   nav { justify-content: flex-start; }
-  h1 { font-size: clamp(42px, 15vw, 70px); }
+  h1 { font-size: clamp(42px, 14vw, 68px); }
   footer { flex-wrap: wrap; }
   footer span { width: 100%; }
 }
