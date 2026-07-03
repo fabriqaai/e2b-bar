@@ -102,7 +102,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         self.menu.cancelTracking()
     }
 
-    @objc private func configureUsageAlerts() {
+    @objc private func openUsageSettings() {
         SettingsOpener.shared.open()
         self.menu.cancelTracking()
     }
@@ -207,7 +207,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         self.menu.addItem(.separator())
         self.menu.addItem(self.usageItem())
         self.menu.addItem(self.actionItem("Usage Dashboard", action: #selector(self.openUsageDashboard), image: "chart.bar.xaxis"))
-        self.menu.addItem(self.actionItem("Configure Alerts...", action: #selector(self.configureUsageAlerts), image: "bell.badge"))
+        self.menu.addItem(self.actionItem("Usage Settings...", action: #selector(self.openUsageSettings), image: "slider.horizontal.3"))
         let refreshUsageItem = self.actionItem(
             self.model.isRefreshingTeamUsage ? "Refreshing Usage..." : "Refresh Usage",
             action: #selector(self.refreshUsage),
@@ -234,7 +234,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         self.menu.addItem(self.actionItem("Settings...", action: #selector(self.openSettings), image: "gearshape"))
 
         self.menu.addItem(.separator())
-        self.menu.addItem(self.actionItem("Quit E2BBar", action: #selector(self.quit), image: "power"))
+        self.menu.addItem(self.actionItem("Quit e2b.bar", action: #selector(self.quit), image: "power"))
         self.refreshViewHeights(in: self.menu)
         self.menu.update()
     }
@@ -259,12 +259,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
                 usage: self.model.teamUsage,
                 usageError: self.model.teamUsageError,
                 hasTeamID: !self.model.teamID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                isRefreshing: self.model.isRefreshingTeamUsage,
-                estimatedDailyCostUSD: self.model.estimatedDailyCostUSD,
-                alertsEnabled: self.model.usageAlertsEnabled,
-                concurrentLimit: self.model.usageConcurrentLimit,
-                startsLimit: self.model.usageStartsPerDayLimit,
-                costLimitUSD: self.model.usageDailyCostLimitUSD
+                isRefreshing: self.model.isRefreshingTeamUsage
             ))
         )
         item.isEnabled = false
@@ -292,6 +287,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     private static func compactActionMessage(_ message: String) -> String {
         let trimmed = message
+            .replacingOccurrences(of: "e2b.bar is ", with: "")
             .replacingOccurrences(of: "E2BBar is ", with: "")
             .replacingOccurrences(of: "Last action: ", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -524,7 +520,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         button.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
         button.image = NSImage(systemSymbolName: "shippingbox", accessibilityDescription: nil)
         button.imagePosition = .imageLeft
-        button.toolTip = "E2BBar: \(self.model.snapshot.runningCount) running, \(self.model.snapshot.pausedCount) paused"
+        button.toolTip = "e2b.bar: \(self.model.snapshot.runningCount) running, \(self.model.snapshot.pausedCount) paused"
     }
 
     private func statusTitle() -> String {

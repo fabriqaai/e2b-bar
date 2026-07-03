@@ -47,11 +47,11 @@ function renderPage() {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>E2BBar - macOS menu bar for E2B sandboxes</title>
-    <meta name="description" content="E2BBar is an open-source macOS menu bar app for monitoring E2B sandboxes, metrics, logs, lifecycle events, files, processes, ports, and usage alerts." />
+    <title>e2b.bar - macOS menu bar for E2B sandboxes</title>
+    <meta name="description" content="e2b.bar is an open-source macOS menu bar app for monitoring E2B sandboxes, metrics, logs, lifecycle events, files, processes, ports, and team usage." />
     <meta name="theme-color" content="#f5f1e8" />
     <link rel="canonical" href="https://e2b.bar/" />
-    <meta property="og:title" content="E2BBar" />
+    <meta property="og:title" content="e2b.bar" />
     <meta property="og:description" content="Open-source E2B sandbox monitoring from your macOS menu bar." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://e2b.bar/" />
@@ -63,9 +63,9 @@ function renderPage() {
   </head>
   <body>
     <header class="top">
-      <a class="wordmark" href="/" aria-label="E2BBar home">
+      <a class="wordmark" href="/" aria-label="e2b.bar home">
         <span class="cube">E2B</span>
-        <span>E2BBar</span>
+        <span>e2b.bar</span>
       </a>
       <nav aria-label="Primary">
         <a href="/github">Source</a>
@@ -78,7 +78,7 @@ function renderPage() {
       <section class="hero" aria-labelledby="title">
         <p class="kicker">Open-source macOS menu bar app</p>
         <div class="hero-grid">
-          <h1 id="title">E2BBar</h1>
+          <h1 id="title">e2b.bar</h1>
           <div class="intro">
             <p>E2B sandboxes, visible without another browser tab.</p>
             <div class="actions" aria-label="Download and source links">
@@ -90,15 +90,15 @@ function renderPage() {
       </section>
 
       <figure class="screenshot">
-        <img src="/screenshot.webp" width="1500" height="1198" alt="E2BBar showing a running E2B sandbox, inline CPU memory disk metrics, sandbox actions, and searchable logs." />
+        <img src="/screenshot.webp" width="1500" height="1198" alt="e2b.bar showing a running E2B sandbox, inline CPU memory disk metrics, sandbox actions, and searchable logs." />
       </figure>
 
       <section class="plain" aria-labelledby="does">
         <h2 id="does">What it does</h2>
         <div class="rows">
-          <p>Paste your E2B API key once. E2BBar stores it in Keychain and lists your running and paused sandboxes.</p>
+          <p>Paste your E2B API key once. e2b.bar stores it in Keychain and lists your running and paused sandboxes.</p>
           <p>See CPU, memory, disk, TTL, lifecycle events, logs, ports, files, processes, and network controls from the menu bar.</p>
-          <p>Configure local alerts for expiration, concurrent sandboxes, starts per day, and estimated daily cost.</p>
+          <p>View E2B-backed team usage metrics and open the right E2B dashboard page from the menu.</p>
           <p>Keep destructive actions hidden until you explicitly enable them.</p>
         </div>
       </section>
@@ -121,7 +121,7 @@ function renderPage() {
     </main>
 
     <footer>
-      <span>E2BBar</span>
+      <span>e2b.bar</span>
       <a class="fabriqa" href="https://fabriqa.ai" target="_blank" rel="noreferrer">
         <svg viewBox="0 0 64 65" width="18" height="18" aria-hidden="true">
           <rect x="0" y="0" width="64" height="11" rx="6" fill="#b8572d"></rect>
@@ -143,10 +143,10 @@ function schema() {
   return {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
-    name: "E2BBar",
+    name: "e2b.bar",
     applicationCategory: "DeveloperApplication",
     operatingSystem: "macOS 14+",
-    description: "Open-source macOS menu bar app for monitoring E2B sandboxes, metrics, logs, lifecycle events, usage alerts, files, processes, ports, and safe actions.",
+    description: "Open-source macOS menu bar app for monitoring E2B sandboxes, metrics, logs, lifecycle events, team usage, files, processes, ports, and safe actions.",
     url: "https://e2b.bar",
     image: SCREENSHOT_URL,
     downloadUrl: LATEST_DMG_URL,

@@ -50,39 +50,18 @@ final class AppModel: ObservableObject {
         }
     }
     @Published var teamID: String {
-        didSet { defaults.set(teamID, forKey: DefaultsKey.teamID) }
-    }
-    @Published var usageAlertsEnabled: Bool {
         didSet {
-            defaults.set(usageAlertsEnabled, forKey: DefaultsKey.usageAlertsEnabled)
-            if usageAlertsEnabled {
-                Task { await requestUsageNotificationPermission() }
+            defaults.set(teamID, forKey: DefaultsKey.teamID)
+            if oldValue.trimmingCharacters(in: .whitespacesAndNewlines) != teamID.trimmingCharacters(in: .whitespacesAndNewlines) {
+                teamUsage = nil
+                teamUsageError = nil
+                onSnapshotChange?()
             }
-            Task { await checkUsageAlerts() }
         }
     }
-    @Published var usageConcurrentLimit: Int {
-        didSet {
-            usageConcurrentLimit = max(0, usageConcurrentLimit)
-            defaults.set(usageConcurrentLimit, forKey: DefaultsKey.usageConcurrentLimit)
-            Task { await checkUsageAlerts() }
-        }
+    @Published var usageDashboardPath: String {
+        didSet { defaults.set(usageDashboardPath, forKey: DefaultsKey.usageDashboardPath) }
     }
-    @Published var usageStartsPerDayLimit: Int {
-        didSet {
-            usageStartsPerDayLimit = max(0, usageStartsPerDayLimit)
-            defaults.set(usageStartsPerDayLimit, forKey: DefaultsKey.usageStartsPerDayLimit)
-            Task { await checkUsageAlerts() }
-        }
-    }
-    @Published var usageDailyCostLimitUSD: Double {
-        didSet {
-            usageDailyCostLimitUSD = max(0, usageDailyCostLimitUSD)
-            defaults.set(usageDailyCostLimitUSD, forKey: DefaultsKey.usageDailyCostLimitUSD)
-            Task { await checkUsageAlerts() }
-        }
-    }
-    @Published private(set) var estimatedDailyCostUSD: Double = 0
     @Published private(set) var teamUsage: TeamUsageSummary?
     @Published private(set) var teamUsageError: String?
     @Published private(set) var isRefreshingTeamUsage = false
@@ -97,15 +76,9 @@ final class AppModel: ObservableObject {
     private let updater = GitHubUpdater()
     private var cachedAPIKey: String?
     private var sentExpirationAlertKeys = Set<String>()
-    private var sentUsageAlertKeys = Set<String>()
     private var latestLifecycleEventID: String?
-    private var costEstimateDayID = AppModel.dayID(for: Date())
-    private var lastCostSampleDate: Date?
 
     private static let metricsFetchLimit = 24
-    private static let cpuCostPerVCPUSecond = 0.000014
-    private static let memoryCostPerGiBSecond = 0.0000045
-    private static let maxCostSampleInterval: TimeInterval = 15 * 60
     private static let lifecycleEventTypes = [
         "sandbox.lifecycle.created",
         "sandbox.lifecycle.updated",
@@ -133,21 +106,12 @@ final class AppModel: ObservableObject {
         destructiveActionsEnabled = defaults.object(forKey: DefaultsKey.destructiveActionsEnabled) as? Bool ?? false
         lifecycleEventsEnabled = defaults.object(forKey: DefaultsKey.lifecycleEventsEnabled) as? Bool ?? true
         teamID = defaults.string(forKey: DefaultsKey.teamID) ?? ""
-        usageAlertsEnabled = defaults.object(forKey: DefaultsKey.usageAlertsEnabled) as? Bool ?? false
-        usageConcurrentLimit = max(0, defaults.integer(forKey: DefaultsKey.usageConcurrentLimit))
-        usageStartsPerDayLimit = max(0, defaults.integer(forKey: DefaultsKey.usageStartsPerDayLimit))
-        usageDailyCostLimitUSD = max(0, defaults.double(forKey: DefaultsKey.usageDailyCostLimitUSD))
-        costEstimateDayID = defaults.string(forKey: DefaultsKey.usageCostEstimateDayID) ?? Self.dayID(for: Date())
-        estimatedDailyCostUSD = max(0, defaults.double(forKey: DefaultsKey.estimatedDailyCostUSD))
+        usageDashboardPath = defaults.string(forKey: DefaultsKey.usageDashboardPath) ?? ""
         latestLifecycleEventID = defaults.string(forKey: DefaultsKey.latestLifecycleEventID)
-        resetCostEstimateIfNeeded(now: Date())
         updateLaunchAtLogin(enabled: launchAtLoginEnabled)
         reloadCredentialState()
         if expirationAlertThreshold != .off {
             Task { await requestExpirationNotificationPermission() }
-        }
-        if usageAlertsEnabled {
-            Task { await requestUsageNotificationPermission() }
         }
     }
 
@@ -172,7 +136,6 @@ final class AppModel: ObservableObject {
                 }
             }
             let metrics = await fetchMetricSummaries(client: client, sandboxes: sortedSandboxes)
-            trackDailyCostEstimate(sandboxes: sortedSandboxes)
             apply(DashboardSnapshot(
                 sandboxes: sortedSandboxes,
                 totals: result.totals,
@@ -182,7 +145,6 @@ final class AppModel: ObservableObject {
             ))
             await captureLifecycleBaseline(client: client)
             await notifyExpiringSandboxes(sortedSandboxes)
-            await checkUsageAlerts()
         } catch {
             apply(snapshot.with(error: Self.errorMessage(error)))
         }
@@ -256,7 +218,7 @@ final class AppModel: ObservableObject {
     }
 
     func openUsageDashboard() {
-        open("https://e2b.dev/dashboard/usage")
+        open(Self.usageDashboardURL(from: usageDashboardPath).absoluteString)
     }
 
     func openDocs() {
@@ -343,8 +305,8 @@ final class AppModel: ObservableObject {
                 maxConcurrent: try? await maxConcurrent,
                 maxStartRate: try? await maxStartRate
             )
-            await checkUsageAlerts()
         } catch {
+            teamUsage = nil
             teamUsageError = Self.errorMessage(error)
         }
     }
@@ -363,15 +325,15 @@ final class AppModel: ObservableObject {
             let result = try await updater.checkForUpdate(currentVersion: Self.currentAppVersion)
             switch result {
             case .upToDate(let currentVersion, _):
-                setActionMessage("E2BBar is up to date (\(currentVersion))")
+                setActionMessage("e2b.bar is up to date (\(currentVersion))")
             case .available(let update):
                 switch promptForUpdate(update) {
                 case .install:
-                    setActionMessage("Downloading E2BBar \(update.release.versionString)...")
+                    setActionMessage("Downloading e2b.bar \(update.release.versionString)...")
                     let installResult = try await updater.downloadAndInstall(update)
                     switch installResult {
                     case .scheduledRelaunch(let version):
-                        setActionMessage("Installing E2BBar \(version) and relaunching")
+                        setActionMessage("Installing e2b.bar \(version) and relaunching")
                         NSApp.terminate(nil)
                     case .manual(let dmgURL, let reason):
                         NSWorkspace.shared.open(dmgURL)
@@ -379,7 +341,7 @@ final class AppModel: ObservableObject {
                     }
                 case .releaseNotes:
                     NSWorkspace.shared.open(update.release.htmlURL)
-                    setActionMessage("Opened release notes for E2BBar \(update.release.versionString)")
+                    setActionMessage("Opened release notes for e2b.bar \(update.release.versionString)")
                 case .cancel:
                     setActionMessage("Update \(update.release.versionString) is available")
                 }
@@ -398,18 +360,6 @@ final class AppModel: ObservableObject {
             }
         } catch {
             apply(snapshot.with(error: "Notifications: \(Self.errorMessage(error))"))
-        }
-    }
-
-    func requestUsageNotificationPermission() async {
-        guard usageAlertsEnabled else { return }
-        do {
-            let allowed = try await ExpirationNotifier.requestAuthorization()
-            if !allowed {
-                setActionMessage("macOS notifications are disabled for usage alerts")
-            }
-        } catch {
-            apply(snapshot.with(error: "Usage notifications: \(Self.errorMessage(error))"))
         }
     }
 
@@ -560,101 +510,6 @@ final class AppModel: ObservableObject {
         onSnapshotChange?()
     }
 
-    private func trackDailyCostEstimate(sandboxes: [E2BSandbox], now: Date = Date()) {
-        resetCostEstimateIfNeeded(now: now)
-        defer { lastCostSampleDate = now }
-
-        guard let lastCostSampleDate else { return }
-        let elapsed = min(max(0, now.timeIntervalSince(lastCostSampleDate)), Self.maxCostSampleInterval)
-        guard elapsed > 0 else { return }
-
-        let costPerSecond = sandboxes
-            .filter { $0.state == .running }
-            .reduce(0.0) { total, sandbox in
-                total + Self.estimatedCostPerSecond(sandbox)
-            }
-
-        guard costPerSecond > 0 else { return }
-        estimatedDailyCostUSD += costPerSecond * elapsed
-        defaults.set(estimatedDailyCostUSD, forKey: DefaultsKey.estimatedDailyCostUSD)
-    }
-
-    private func resetCostEstimateIfNeeded(now: Date) {
-        let today = Self.dayID(for: now)
-        guard costEstimateDayID != today else { return }
-        costEstimateDayID = today
-        estimatedDailyCostUSD = 0
-        lastCostSampleDate = nil
-        sentUsageAlertKeys.removeAll()
-        defaults.set(today, forKey: DefaultsKey.usageCostEstimateDayID)
-        defaults.set(estimatedDailyCostUSD, forKey: DefaultsKey.estimatedDailyCostUSD)
-    }
-
-    private func checkUsageAlerts() async {
-        resetCostEstimateIfNeeded(now: Date())
-        guard usageAlertsEnabled else { return }
-
-        let entries = usageAlertEntries()
-        guard !entries.isEmpty else { return }
-
-        for entry in entries {
-            guard entry.limit > 0 else { continue }
-            let ratio = entry.value / entry.limit
-            for level in UsageAlertLevel.allCases where ratio >= level.fraction {
-                let key = "\(costEstimateDayID)|\(entry.id)|\(level.rawValue)|\(entry.limitDescription)"
-                guard !sentUsageAlertKeys.contains(key) else { continue }
-                sentUsageAlertKeys.insert(key)
-                try? await UsageNotifier.notifyLimitCrossed(
-                    metricName: entry.name,
-                    valueDescription: entry.valueDescription,
-                    limitDescription: entry.limitDescription,
-                    level: level
-                )
-            }
-        }
-    }
-
-    private func usageAlertEntries() -> [UsageAlertEntry] {
-        var entries: [UsageAlertEntry] = []
-
-        if usageConcurrentLimit > 0 {
-            let concurrent = Double(teamUsage?.latestConcurrent ?? snapshot.runningCount)
-            entries.append(UsageAlertEntry(
-                id: "concurrent",
-                name: "Concurrent sandboxes",
-                value: concurrent,
-                limit: Double(usageConcurrentLimit),
-                valueDescription: "\(Int(concurrent))",
-                limitDescription: "\(usageConcurrentLimit)"
-            ))
-        }
-
-        if usageStartsPerDayLimit > 0, let usage = teamUsage {
-            let starts = usage.estimatedStartsInWindow
-            entries.append(UsageAlertEntry(
-                id: "starts",
-                name: "Sandbox starts today",
-                value: Double(starts),
-                limit: Double(usageStartsPerDayLimit),
-                valueDescription: "\(starts)",
-                limitDescription: "\(usageStartsPerDayLimit)"
-            ))
-        }
-
-        if usageDailyCostLimitUSD > 0 {
-            entries.append(UsageAlertEntry(
-                id: "cost",
-                name: "Estimated E2B cost today",
-                value: estimatedDailyCostUSD,
-                limit: usageDailyCostLimitUSD,
-                valueDescription: Self.currency(estimatedDailyCostUSD),
-                limitDescription: Self.currency(usageDailyCostLimitUSD)
-            ))
-        }
-
-        return entries
-    }
-
     private func notifyExpiringVisibleSandboxes() async {
         await notifyExpiringSandboxes(snapshot.sandboxes)
     }
@@ -757,28 +612,6 @@ final class AppModel: ObservableObject {
         return "\(seconds)s"
     }
 
-    private static func estimatedCostPerSecond(_ sandbox: E2BSandbox) -> Double {
-        guard sandbox.state == .running else { return 0 }
-        let cpuCost = Double(max(0, sandbox.cpuCount)) * Self.cpuCostPerVCPUSecond
-        let memoryGiB = Double(max(0, sandbox.memoryMB)) / 1024.0
-        let memoryCost = memoryGiB * Self.memoryCostPerGiBSecond
-        return cpuCost + memoryCost
-    }
-
-    static func currency(_ value: Double) -> String {
-        if value >= 1 {
-            return String(format: "$%.2f", value)
-        }
-        if value >= 0.01 {
-            return String(format: "$%.3f", value)
-        }
-        return String(format: "$%.4f", value)
-    }
-
-    private static func dayID(for date: Date) -> String {
-        Self.dayFormatter.string(from: date)
-    }
-
     private static func errorMessage(_ error: Error) -> String {
         if let decodingError = error as? DecodingError {
             switch decodingError {
@@ -806,25 +639,40 @@ final class AppModel: ObservableObject {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     }
 
-    private static let dayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
-
     private static func portURL(sandboxID: String, port: Int) -> URL {
         URL(string: "https://\(port)-\(sandboxID).e2b.app")!
     }
 
-    private struct UsageAlertEntry {
-        var id: String
-        var name: String
-        var value: Double
-        var limit: Double
-        var valueDescription: String
-        var limitDescription: String
+    private static func usageDashboardURL(from value: String) -> URL {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return URL(string: "https://e2b.dev/dashboard")!
+        }
+
+        if let url = URL(string: trimmed), let host = url.host, host.hasSuffix("e2b.dev") {
+            return url
+        }
+
+        let stripped = trimmed
+            .replacingOccurrences(of: "https://e2b.dev/", with: "")
+            .replacingOccurrences(of: "http://e2b.dev/", with: "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+
+        let slug: String
+        if stripped.hasPrefix("dashboard/") {
+            let parts = stripped.split(separator: "/").map(String.init)
+            slug = parts.dropFirst().first ?? ""
+        } else {
+            slug = stripped.split(separator: "/").first.map(String.init) ?? ""
+        }
+
+        guard !slug.isEmpty,
+              slug.range(of: #"^[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil
+        else {
+            return URL(string: "https://e2b.dev/dashboard")!
+        }
+
+        return URL(string: "https://e2b.dev/dashboard/\(slug)/usage")!
     }
 
     private enum UpdatePromptChoice {
@@ -836,7 +684,7 @@ final class AppModel: ObservableObject {
     private func promptForUpdate(_ update: UpdateCandidate) -> UpdatePromptChoice {
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = "E2BBar \(update.release.versionString) is available"
+        alert.messageText = "e2b.bar \(update.release.versionString) is available"
         alert.informativeText = """
         Current version: \(update.currentVersion)
         Download: \(update.asset.name) (\(update.asset.sizeLabel))
@@ -920,12 +768,7 @@ enum DefaultsKey {
     static let lifecycleEventsEnabled = "lifecycleEventsEnabled"
     static let latestLifecycleEventID = "latestLifecycleEventID"
     static let teamID = "teamID"
-    static let usageAlertsEnabled = "usageAlertsEnabled"
-    static let usageConcurrentLimit = "usageConcurrentLimit"
-    static let usageStartsPerDayLimit = "usageStartsPerDayLimit"
-    static let usageDailyCostLimitUSD = "usageDailyCostLimitUSD"
-    static let estimatedDailyCostUSD = "estimatedDailyCostUSD"
-    static let usageCostEstimateDayID = "usageCostEstimateDayID"
+    static let usageDashboardPath = "usageDashboardPath"
 }
 
 enum KeychainAccount {

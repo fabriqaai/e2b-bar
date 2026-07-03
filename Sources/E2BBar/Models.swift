@@ -272,7 +272,7 @@ struct E2BMetric: Decodable, Hashable, Sendable {
 
     static func summary(sandboxID: String, metrics: [E2BMetric]) -> String {
         guard !metrics.isEmpty else {
-            return "E2BBar metrics for \(sandboxID)\n\nNo metrics returned for the selected interval."
+            return "e2b.bar metrics for \(sandboxID)\n\nNo metrics returned for the selected interval."
         }
 
         let sorted = metrics.sorted { $0.timestampUnix < $1.timestampUnix }
@@ -284,7 +284,7 @@ struct E2BMetric: Decodable, Hashable, Sendable {
         let range = Self.rangeDescription(sorted)
 
         return """
-        E2BBar metrics for \(sandboxID)
+        e2b.bar metrics for \(sandboxID)
 
         Samples: \(sorted.count)
         Window: \(range)
@@ -743,7 +743,7 @@ struct E2BLogEntry: Decodable, Hashable, Sendable {
 
     static func transcript(sandboxID: String, logs: [E2BLogEntry]) -> String {
         guard !logs.isEmpty else {
-            return "E2BBar logs for \(sandboxID)\n\nNo logs returned."
+            return "e2b.bar logs for \(sandboxID)\n\nNo logs returned."
         }
 
         let lines = logs.map { entry in
@@ -759,7 +759,7 @@ struct E2BLogEntry: Decodable, Hashable, Sendable {
             .joined(separator: " ")
         }
 
-        return "E2BBar logs for \(sandboxID)\n\n" + lines.joined(separator: "\n")
+        return "e2b.bar logs for \(sandboxID)\n\n" + lines.joined(separator: "\n")
     }
 
     private func stringValue(keys: [String]) -> String? {

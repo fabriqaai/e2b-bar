@@ -123,7 +123,7 @@ private struct GeneralSettingsView: View {
             }
 
             Section("Startup") {
-                Toggle("Launch E2BBar at login", isOn: self.$model.launchAtLoginEnabled)
+                Toggle("Launch e2b.bar at login", isOn: self.$model.launchAtLoginEnabled)
             }
 
             Section("Notifications") {
@@ -164,8 +164,8 @@ private struct GeneralSettingsView: View {
                         Task { await self.model.refresh() }
                     }
                     .disabled(self.model.isRefreshing)
-                    Button("Open Dashboard") {
-                        self.model.openDashboard()
+                    Button("Open Usage Dashboard") {
+                        self.model.openUsageDashboard()
                     }
                 }
             }
@@ -223,6 +223,10 @@ private struct UsageSettingsView: View {
         Form {
             Section("Team") {
                 TextField("Team ID", text: self.$model.teamID)
+                TextField("Dashboard slug or usage URL", text: self.$model.usageDashboardPath)
+                Text("Use the account/team part from your dashboard URL, for example cengiz from e2b.dev/dashboard/cengiz/usage. E2B's API key endpoints do not expose this dashboard slug.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 HStack {
                     Button("Refresh Usage") {
                         Task { await self.model.refreshTeamUsage() }
@@ -258,11 +262,6 @@ private struct UsageSettingsView: View {
                                 .monospacedDigit()
                         }
                         GridRow {
-                            Text("Estimated cost today")
-                            Text(AppModel.currency(self.model.estimatedDailyCostUSD))
-                                .monospacedDigit()
-                        }
-                        GridRow {
                             Text("Samples")
                             Text("\(usage.samples.count)")
                                 .monospacedDigit()
@@ -280,30 +279,6 @@ private struct UsageSettingsView: View {
                     Text("No usage loaded")
                         .foregroundStyle(.secondary)
                 }
-            }
-
-            Section("Local Alerts") {
-                Toggle("Notify at 50%, 80%, 90%, and 100%", isOn: self.$model.usageAlertsEnabled)
-                Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 8) {
-                    GridRow {
-                        Text("Estimated daily cost")
-                        TextField("0", value: self.$model.usageDailyCostLimitUSD, format: .number.precision(.fractionLength(2)))
-                            .frame(width: 90)
-                    }
-                    GridRow {
-                        Text("Concurrent sandboxes")
-                        TextField("0", value: self.$model.usageConcurrentLimit, format: .number)
-                            .frame(width: 90)
-                    }
-                    GridRow {
-                        Text("Starts per day")
-                        TextField("0", value: self.$model.usageStartsPerDayLimit, format: .number)
-                            .frame(width: 90)
-                    }
-                }
-                Text("These are local E2BBar alerts. Estimated cost is sampled from currently running sandbox CPU/RAM and is not an E2B billing limit.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -332,7 +307,7 @@ private struct AboutSettingsView: View {
             HStack(spacing: 12) {
                 Self.appIcon
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("E2BBar")
+                    Text("e2b.bar")
                         .font(.title2.weight(.semibold))
                     Text("Your E2B sandboxes, one glance away.")
                         .foregroundStyle(.secondary)
@@ -340,7 +315,7 @@ private struct AboutSettingsView: View {
             }
             Divider()
 
-            Text("E2BBar is a tiny macOS menu bar app for people who keep remote E2B environments running while they build, test, or hand work between agents. It shows running and paused sandboxes, resource totals, expiration timing, metadata, and quick links without opening the dashboard.")
+            Text("e2b.bar is a tiny macOS menu bar app for people who keep remote E2B environments running while they build, test, or hand work between agents. It shows running and paused sandboxes, resource totals, expiration timing, metadata, and quick links without opening the dashboard.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

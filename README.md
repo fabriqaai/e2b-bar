@@ -1,6 +1,6 @@
-# E2BBar
+# e2b.bar
 
-E2BBar is a native macOS menu bar app for keeping an eye on your E2B sandboxes without opening the browser. It shows running and paused sandboxes, inline metrics, expiration timing, lifecycle events, metadata, and quick tools for logs, files, processes, ports, and network controls.
+e2b.bar is a native macOS menu bar app for keeping an eye on your E2B sandboxes without opening the browser. It shows running and paused sandboxes, inline metrics, expiration timing, lifecycle events, metadata, team usage metrics, and quick tools for logs, files, processes, ports, and network controls.
 
 Website: https://e2b.bar
 
@@ -24,8 +24,8 @@ Source: https://github.com/fabriqaai/e2b-bar
 - Uses batch sandbox metrics when possible instead of one metrics request per sandbox.
 - Can use lifecycle events between full refreshes to avoid polling the whole sandbox list every interval.
 - Shows a team usage mini-dashboard in the menu when you provide a team ID.
-- Shows Live concurrent, 24h starts, Peak concurrent, and Start rate with small menu bar charts.
-- Supports local usage alerts for estimated daily cost, concurrent sandboxes, and starts per day at 50%, 80%, 90%, and 100%.
+- Shows Live concurrent, estimated 24h starts, Peak concurrent, and latest start rate with labeled menu bar trends.
+- Opens the correct E2B usage dashboard when you configure your dashboard slug or full usage URL.
 - Checks GitHub Releases for updates and can download/install the latest DMG.
 - Can notify you before sandboxes expire.
 - Supports state filters for running, paused, or both.
@@ -39,7 +39,7 @@ Source: https://github.com/fabriqaai/e2b-bar
 
 ## Screens And Menus
 
-E2BBar runs as an agent app, so it does not show a Dock icon. The main surface is the menu bar item.
+e2b.bar runs as an agent app, so it does not show a Dock icon. The main surface is the menu bar item.
 
 The menu includes:
 
@@ -48,7 +48,7 @@ The menu includes:
 - API fetch totals from the E2B response headers when available.
 - Last refreshed time.
 - Error text when the latest request fails.
-- Usage section with live team metrics, tiny charts, estimated daily cost, usage dashboard link, alert configuration, and refresh usage action.
+- Usage section with E2B-backed team metrics, labeled trends, usage dashboard link, usage settings, and refresh usage action.
 - Sandboxes submenu.
 - Per-sandbox action menus.
 - Refresh action.
@@ -60,7 +60,7 @@ The Settings window includes:
 
 - General: state filter, metadata filter, refresh interval, launch at login, expiration alerts, lifecycle-event polling, destructive-action visibility, refresh, dashboard link.
 - Account: credential status, API key save and clear actions, refresh, dashboard and docs links.
-- Usage: team ID, latest concurrent sandboxes, start rate, max concurrent usage, max start rate, estimated daily cost, and local alert limits.
+- Usage: team ID, optional dashboard slug/URL, latest concurrent sandboxes, start rate, max concurrent usage, and max start rate.
 - About: app purpose, version, update check, website, source, API endpoint, storage note, and external links.
 
 ## Requirements
@@ -84,7 +84,7 @@ If the direct download URL returns 404, the repository does not yet have a compl
 
 ## Configure E2B
 
-Open E2BBar from the menu bar, choose Settings, then go to Account and paste your E2B API key.
+Open e2b.bar from the menu bar, choose Settings, then go to Account and paste your E2B API key.
 
 The app validates that the key starts with `e2b_` and is followed by hexadecimal characters. Saved keys are stored in macOS Keychain under the service:
 
@@ -102,7 +102,7 @@ The Keychain value takes precedence over the environment variable.
 
 ## E2B API Usage
 
-E2BBar calls the E2B v2 sandboxes API:
+e2b.bar calls the E2B v2 sandboxes API:
 
 ```http
 GET https://api.e2b.app/v2/sandboxes
@@ -119,7 +119,7 @@ The app sends these query parameters:
 
 Pagination is followed for up to 20 pages. The app also reads `X-Total-Running` and `X-Total-Paused` headers when E2B returns them.
 
-For visible sandbox details and actions, E2BBar also calls:
+For visible sandbox details and actions, e2b.bar also calls:
 
 ```http
 GET https://api.e2b.app/sandboxes/metrics?sandbox_ids=...
@@ -143,14 +143,16 @@ GET https://api.e2b.app/teams/{teamID}/metrics
 GET https://api.e2b.app/teams/{teamID}/metrics/max
 ```
 
-The public E2B team metrics API currently exposes concurrent sandbox count and sandbox start rate. E2BBar derives the menu usage view from those fields:
+The public E2B team metrics API currently exposes concurrent sandbox count and sandbox start rate. e2b.bar derives the menu usage view from those fields:
 
 - Live concurrent: latest `concurrentSandboxes` sample.
-- 24h starts: estimated from `sandboxStartRate` samples over the loaded window.
+- Estimated 24h starts: derived from `sandboxStartRate` samples over the loaded window.
 - Peak concurrent: `GET /teams/{teamID}/metrics/max?metric=concurrent_sandboxes`.
 - Start rate: latest `sandboxStartRate` converted to starts per minute.
 
-Estimated daily cost is local to E2BBar. The app samples visible running sandboxes while it is running and estimates cost from CPU and RAM allocation using public E2B compute pricing. It is useful as an early warning, but it is not an E2B invoice, billing API result, or spending-limit control. E2B billing and official spending limits still live in the E2B dashboard.
+e2b.bar does not estimate billing locally and does not set E2B usage limits from the app. E2B billing totals, usage-limit dollar amounts, and official billing alerts live in the E2B dashboard unless E2B exposes a billing API later.
+
+E2B usage dashboard URLs include an account or team slug, for example `https://e2b.dev/dashboard/cengiz/usage`. e2b.bar cannot derive that slug from the stored E2B API key: the documented `GET /teams` endpoint uses bearer authentication and returns `teamID`, `name`, `apiKey`, and `isDefault`, not a dashboard slug. Add the slug or full usage URL in Settings -> Usage if you want the menu item to open the exact usage page; otherwise it opens the generic E2B dashboard.
 
 The sandbox inspector uses envd APIs through public sandbox URLs like `https://49983-{sandboxID}.e2b.app` for file and process tools:
 
@@ -172,15 +174,15 @@ File removal, process signals, and network changes stay disabled until destructi
 
 ## Updates
 
-E2BBar checks GitHub Releases from the menu bar item or the About tab:
+e2b.bar checks GitHub Releases from the menu bar item or the About tab:
 
 ```http
 GET https://api.github.com/repos/fabriqaai/e2b-bar/releases/latest
 ```
 
-If a newer tagged release includes an asset named `E2BBar.dmg`, the app can download it, mount the DMG, replace `/Applications/E2BBar.app`, and relaunch. If `/Applications` is not writable, E2BBar opens the downloaded DMG so you can install it manually.
+If a newer tagged release includes an asset named `E2BBar.dmg`, the app can download it, mount the DMG, replace `/Applications/E2BBar.app`, and relaunch. If `/Applications` is not writable, e2b.bar opens the downloaded DMG so you can install it manually.
 
-The updater compares the release tag, such as `v0.5.0`, against the bundled `CFBundleShortVersionString`.
+The updater compares the release tag, such as `v0.5.1`, against the bundled `CFBundleShortVersionString`.
 
 ## Run Locally
 
@@ -252,8 +254,8 @@ Only tagged runs publish a GitHub release. Manual runs still build and upload th
 Create a notarized release:
 
 ```sh
-git tag v0.5.0
-git push origin v0.5.0
+git tag v0.5.1
+git push origin v0.5.1
 ```
 
 The release job does this on `macos-15`:
@@ -391,7 +393,7 @@ Check the state filter and metadata filter in Settings. The app defaults to runn
 
 Lifecycle events do not update the list
 
-The app still refreshes fully when the menu opens. Scheduled lifecycle checks use `GET /events/sandboxes`; if that call fails, E2BBar falls back to a full refresh.
+The app still refreshes fully when the menu opens. Scheduled lifecycle checks use `GET /events/sandboxes`; if that call fails, e2b.bar falls back to a full refresh.
 
 File or process tools fail
 
@@ -407,7 +409,7 @@ Make sure the latest GitHub release is tagged higher than the app version and in
 
 I do not see Pause or Delete
 
-Open Settings, go to General, and enable Show destructive actions. E2BBar hides these actions by default so accidental clicks do not kill a sandbox.
+Open Settings, go to General, and enable Show destructive actions. e2b.bar hides these actions by default so accidental clicks do not kill a sandbox.
 
 The website deploy succeeds but the domain does not resolve immediately
 
@@ -415,7 +417,7 @@ Check authoritative Cloudflare DNS first. Local resolvers can lag even after Clo
 
 ## Current Scope
 
-E2BBar is intentionally small. It is meant to be a fast menu bar companion for visibility and light operations, not a full dashboard replacement. The current app lists and filters sandboxes, watches lifecycle events, shows inline batch metrics, opens searchable logs, opens port URLs, shows team usage, browses files, lists/runs/signals processes, edits network rules, copies IDs/logs/metrics, extends TTLs, sets timeouts, optionally pauses and deletes sandboxes, sends expiration alerts, checks for GitHub release updates, opens external surfaces, and keeps credentials local.
+e2b.bar is intentionally small. It is meant to be a fast menu bar companion for visibility and light operations, not a full dashboard replacement. The current app lists and filters sandboxes, watches lifecycle events, shows inline batch metrics, opens searchable logs, opens port URLs, shows E2B-backed team usage, browses files, lists/runs/signals processes, edits network rules, copies IDs/logs/metrics, extends TTLs, sets timeouts, optionally pauses and deletes sandboxes, sends expiration alerts, checks for GitHub release updates, opens external surfaces, and keeps credentials local.
 
 Useful future additions:
 

@@ -5,11 +5,6 @@ struct UsageMenuView: View {
     let usageError: String?
     let hasTeamID: Bool
     let isRefreshing: Bool
-    let estimatedDailyCostUSD: Double
-    let alertsEnabled: Bool
-    let concurrentLimit: Int
-    let startsLimit: Int
-    let costLimitUSD: Double
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -27,14 +22,24 @@ struct UsageMenuView: View {
 
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2), spacing: 8) {
                 UsageTile(title: "Live concurrent", value: self.liveConcurrent)
-                UsageTile(title: "24h starts", value: self.startsInWindow)
+                UsageTile(title: "Est. 24h starts", value: self.startsInWindow)
                 UsageTile(title: "Peak concurrent", value: self.peakConcurrent)
-                UsageTile(title: "Start rate", value: self.startRate)
+                UsageTile(title: "Latest rate", value: self.startRate)
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                MiniUsageBars(values: self.usage?.concurrentSeries ?? [], color: .green)
-                MiniUsageBars(values: self.usage?.startRateSeries ?? [], color: .orange)
+            VStack(alignment: .leading, spacing: 8) {
+                UsageTrendRow(
+                    title: "Concurrent, 24h",
+                    caption: self.concurrentTrendCaption,
+                    values: self.usage?.concurrentSeries ?? [],
+                    color: Self.concurrentColor
+                )
+                UsageTrendRow(
+                    title: "Starts/min, 24h",
+                    caption: self.startRateTrendCaption,
+                    values: self.usage?.startRateSeries ?? [],
+                    color: Self.startRateColor
+                )
             }
 
             Text(self.footerLine)
@@ -75,7 +80,7 @@ struct UsageMenuView: View {
 
     private var footerLine: String {
         if !self.hasTeamID {
-            return "Add a team ID in Settings to load team metrics."
+            return "Add a team ID in Settings to load E2B team metrics."
         }
         if let usageError, !usageError.isEmpty {
             return usageError
@@ -84,15 +89,7 @@ struct UsageMenuView: View {
             return "Usage has not been loaded yet."
         }
 
-        let cost = "Est. cost \(AppModel.currency(self.estimatedDailyCostUSD))"
-        guard self.alertsEnabled else { return "\(cost) · alerts off" }
-
-        var limits: [String] = []
-        if self.concurrentLimit > 0 { limits.append("C \(self.concurrentLimit)") }
-        if self.startsLimit > 0 { limits.append("starts \(self.startsLimit)") }
-        if self.costLimitUSD > 0 { limits.append("cost \(AppModel.currency(self.costLimitUSD))") }
-        if limits.isEmpty { return "\(cost) · no limits set" }
-        return "\(cost) · alert limits: \(limits.joined(separator: ", "))"
+        return "E2B team metrics · billing and limits live in the dashboard"
     }
 
     private static func number(_ value: Double) -> String {
@@ -104,6 +101,19 @@ struct UsageMenuView: View {
         }
         return String(format: "%.2f", value)
     }
+
+    private var concurrentTrendCaption: String {
+        guard let usage else { return "No samples" }
+        return "peak \(usage.peakConcurrent)"
+    }
+
+    private var startRateTrendCaption: String {
+        guard let usage else { return "No samples" }
+        return "peak \(Self.number(usage.peakStartsPerMinute))/min"
+    }
+
+    private static let concurrentColor = Color(red: 0.12, green: 0.55, blue: 0.36)
+    private static let startRateColor = Color(red: 0.72, green: 0.39, blue: 0.23)
 }
 
 private struct UsageTile: View {
@@ -127,6 +137,31 @@ private struct UsageTile: View {
     }
 }
 
+private struct UsageTrendRow: View {
+    let title: String
+    let caption: String
+    let values: [Double]
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                Circle()
+                    .fill(self.color.opacity(0.72))
+                    .frame(width: 6, height: 6)
+                Text(self.title)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(self.caption)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            MiniUsageBars(values: self.values, color: self.color)
+        }
+    }
+}
+
 private struct MiniUsageBars: View {
     let values: [Double]
     let color: Color
@@ -140,12 +175,12 @@ private struct MiniUsageBars: View {
             HStack(alignment: .bottom, spacing: 2) {
                 if samples.isEmpty {
                     RoundedRectangle(cornerRadius: 1)
-                        .fill(Color.secondary.opacity(0.15))
+                        .fill(Color.secondary.opacity(0.12))
                         .frame(height: 3)
                 } else {
                     ForEach(Array(samples.enumerated()), id: \.offset) { _, value in
                         RoundedRectangle(cornerRadius: 1)
-                            .fill(self.color.opacity(0.62))
+                            .fill(self.color.opacity(0.56))
                             .frame(
                                 width: barWidth,
                                 height: max(3, proxy.size.height * CGFloat(value / maxValue))
@@ -153,9 +188,9 @@ private struct MiniUsageBars: View {
                     }
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottomLeading)
         }
-        .frame(height: 26)
+        .frame(height: 18)
         .accessibilityHidden(true)
     }
 }
