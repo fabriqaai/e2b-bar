@@ -174,10 +174,7 @@ private struct AboutSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 12) {
-                Image(systemName: "shippingbox")
-                    .font(.system(size: 34, weight: .semibold))
-                    .foregroundStyle(.green)
-                    .frame(width: 44, height: 44)
+                Self.appIcon
                 VStack(alignment: .leading, spacing: 2) {
                     Text("E2BBar")
                         .font(.title2.weight(.semibold))
@@ -195,7 +192,7 @@ private struct AboutSettingsView: View {
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
                 GridRow {
                     Text("Version")
-                    Text("0.1.0")
+                    Text("0.1.1")
                 }
                 GridRow {
                     Text("Website")
@@ -235,5 +232,20 @@ private struct AboutSettingsView: View {
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private static var appIcon: some View {
+        if let image = NSImage(named: "E2BBarIcon") {
+            Image(nsImage: image)
+                .resizable()
+                .frame(width: 44, height: 44)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        } else {
+            Image(systemName: "shippingbox")
+                .font(.system(size: 34, weight: .semibold))
+                .foregroundStyle(.green)
+                .frame(width: 44, height: 44)
+        }
     }
 }

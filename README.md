@@ -154,6 +154,7 @@ open build/E2BBar.dmg
 
 Local packaging scripts:
 
+- `Scripts/build_icon.sh`: regenerates `Resources/E2BBarIcon.icns` from the SVG source.
 - `Scripts/package_app.sh`: builds the Swift executable and creates `build/E2BBar.app`.
 - `Scripts/create_dmg.sh`: stages the app with an Applications symlink and creates `build/E2BBar.dmg`.
 
@@ -170,11 +171,11 @@ It runs on:
 
 Only tagged runs publish a GitHub release. Manual runs still build and upload the DMG as a workflow artifact, but they do not create the public release asset unless the ref is a tag.
 
-Create the first notarized release:
+Create a notarized release:
 
 ```sh
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 The release job does this on `macos-15`:
@@ -260,6 +261,9 @@ For CI, use a Cloudflare token scoped to the account and zones that own `e2b.bar
 .
 ├── Sources/E2BBar/              # Native macOS app source
 ├── Resources/Info.plist         # App bundle metadata
+├── Resources/E2BBarIcon.svg     # Editable app icon source
+├── Resources/E2BBarIcon.icns    # macOS app icon
+├── Scripts/build_icon.sh        # SVG to ICNS generator
 ├── Scripts/package_app.sh       # App bundle packaging
 ├── Scripts/create_dmg.sh        # DMG packaging
 ├── worker/index.js              # Cloudflare Worker landing page
