@@ -21,8 +21,121 @@ jobs:
       - name: Build app bundle
         run: make app
 
+      - name: Import Developer ID certificate
+        id: signing
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${CSC_LINK:-}" ] || [ -z "${CSC_KEY_PASSWORD:-}" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Skipping code signing because CSC_LINK or CSC_KEY_PASSWORD is not configured."
+            exit 0
+          fi
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/e2bbar-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          CERT_PATH="$RUNNER_TEMP/developer-id.p12"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          printf '%s' "$CSC_LINK" | base64 --decode > "$CERT_PATH"
+          security import "$CERT_PATH" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$CSC_KEY_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed 's/[ "]//g')
+
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | awk -F '"' '/Developer ID Application/ { print $2; exit }')"
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::No Developer ID Application identity found in CSC_LINK certificate."
+            exit 1
+          fi
+
+          echo "available=true" >> "$GITHUB_OUTPUT"
+          echo "identity=$IDENTITY" >> "$GITHUB_OUTPUT"
+          echo "keychain=$KEYCHAIN_PATH" >> "$GITHUB_OUTPUT"
+          echo "Imported Developer ID Application identity."
+
+      - name: Sign app bundle
+        if: steps.signing.outputs.available == 'true'
+        shell: bash
+        env:
+          IDENTITY: ${{ steps.signing.outputs.identity }}
+        run: |
+          set -euo pipefail
+          codesign --force --deep --options runtime --timestamp --sign "$IDENTITY" build/E2BBar.app
+          codesign --verify --deep --strict --verbose=2 build/E2BBar.app
+
       - name: Create DMG
         run: ./Scripts/create_dmg.sh
+
+      - name: Sign DMG
+        if: steps.signing.outputs.available == 'true'
+        shell: bash
+        env:
+          IDENTITY: ${{ steps.signing.outputs.identity }}
+        run: |
+          set -euo pipefail
+          codesign --force --timestamp --sign "$IDENTITY" build/E2BBar.dmg
+          codesign --verify --verbose=2 build/E2BBar.dmg
+
+      - name: Notarize and staple DMG
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          SIGNING_AVAILABLE: ${{ steps.signing.outputs.available }}
+        run: |
+          set -euo pipefail
+
+          any_apple_credential=false
+          if [ -n "${APPLE_ID:-}" ] || [ -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" ] || [ -n "${APPLE_TEAM_ID:-}" ]; then
+            any_apple_credential=true
+          fi
+
+          if [ "$any_apple_credential" = false ]; then
+            echo "::warning::Skipping notarization because Apple notarization credentials are not configured."
+            exit 0
+          fi
+
+          if [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_APP_SPECIFIC_PASSWORD:-}" ] || [ -z "${APPLE_TEAM_ID:-}" ]; then
+            echo "::error::Incomplete Apple notarization credentials. Set APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, and APPLE_TEAM_ID."
+            exit 1
+          fi
+
+          if [ "${SIGNING_AVAILABLE:-false}" != "true" ]; then
+            echo "::error::Apple notarization credentials are present, but CSC_LINK/CSC_KEY_PASSWORD signing credentials are missing."
+            exit 1
+          fi
+
+          xcrun notarytool submit build/E2BBar.dmg \
+            --wait \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID"
+          xcrun stapler staple build/E2BBar.dmg
+          xcrun stapler validate build/E2BBar.dmg
+
+      - name: Verify DMG
+        run: hdiutil verify build/E2BBar.dmg
+
+      - name: Delete signing keychain
+        if: always() && steps.signing.outputs.available == 'true'
+        shell: bash
+        env:
+          KEYCHAIN_PATH: ${{ steps.signing.outputs.keychain }}
+        run: |
+          if [ -n "${KEYCHAIN_PATH:-}" ]; then
+            security delete-keychain "$KEYCHAIN_PATH" || true
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
