@@ -174,8 +174,8 @@ Only tagged runs publish a GitHub release. Manual runs still build and upload th
 Create a notarized release:
 
 ```sh
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.1.2
+git push origin v0.1.2
 ```
 
 The release job does this on `macos-15`:
