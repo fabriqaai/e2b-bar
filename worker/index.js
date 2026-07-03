@@ -47,7 +47,7 @@ function renderPage() {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>E2BBar - E2B sandboxes in your macOS menu bar</title>
-    <meta name="description" content="A tiny open-source macOS menu bar app for watching running and paused E2B sandboxes, resource totals, expiration timing, and metadata." />
+    <meta name="description" content="A tiny open-source macOS menu bar app for watching E2B sandboxes, inline metrics, searchable logs, expiration alerts, and GitHub release updates." />
     <meta name="theme-color" content="#f7f5ef" />
     <link rel="canonical" href="https://e2b.bar/" />
     <meta property="og:title" content="E2BBar" />
@@ -77,7 +77,7 @@ function renderPage() {
         <div class="copy">
           <p class="eyebrow">Open-source macOS menu bar app</p>
           <h1>E2B sandboxes, without opening another tab.</h1>
-          <p class="dek">E2BBar sits in your menu bar and shows running and paused sandboxes, resource totals, expiration timing, metadata, and quick links back to the places you actually use.</p>
+          <p class="dek">E2BBar sits in your menu bar and shows running and paused sandboxes, inline metrics, expiration timing, searchable logs, and quick links back to the places you actually use.</p>
           <div class="actions">
             <a class="button primary" href="/download">Download latest DMG</a>
             <a class="button secondary" href="/github">View source</a>
@@ -106,11 +106,11 @@ function renderPage() {
             </div>
             <div class="row active">
               <i></i>
-              <span><b>nextjs-agent</b><small>running - e2b-code - expires in 18m</small></span>
+              <span><b>nextjs-agent</b><small>CPU 12% - MEM 410MB/2GB - expires in 18m</small></span>
             </div>
             <div class="row">
               <i></i>
-              <span><b>qa-runner</b><small>paused - 2c / 1GB RAM / metadata</small></span>
+              <span><b>qa-runner</b><small>Logs, metrics, TTL, timeout, safe actions</small></span>
             </div>
           </div>
         </div>
@@ -120,17 +120,17 @@ function renderPage() {
         <article>
           <span>01</span>
           <h2>Watch live sandboxes</h2>
-          <p>Filter running or paused sandboxes, see resource totals, and notice expiring work before it disappears.</p>
+          <p>Filter running or paused sandboxes, see CPU/memory/disk badges, and notice expiring work before it disappears.</p>
         </article>
         <article>
           <span>02</span>
-          <h2>Built for API keys</h2>
-          <p>Your E2B key is stored in macOS Keychain. The app validates key format before sending requests.</p>
+          <h2>Logs without the tab</h2>
+          <p>Open a native logs panel with search, level filtering, refresh, and copy-visible output.</p>
         </article>
         <article>
           <span>03</span>
           <h2>Small on purpose</h2>
-          <p>No account sync, no background service, no dashboard clone. Just a useful status item for E2B users.</p>
+          <p>Keychain storage, hidden destructive actions, and release updates from GitHub without becoming a dashboard clone.</p>
         </article>
       </section>
 
@@ -164,7 +164,7 @@ function schema() {
     name: "E2BBar",
     applicationCategory: "DeveloperApplication",
     operatingSystem: "macOS 14+",
-    description: "A macOS menu bar app for watching E2B sandboxes.",
+    description: "A macOS menu bar app for watching E2B sandboxes, inline metrics, logs, and expiration alerts.",
     url: "https://e2b.bar",
     downloadUrl: LATEST_DMG_URL,
     codeRepository: REPO_URL,

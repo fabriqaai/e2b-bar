@@ -13,10 +13,14 @@ Source: https://github.com/fabriqaai/e2b-bar
 - Shows a compact menu bar counter for running sandboxes.
 - Marks the menu bar item with an error indicator when refresh fails.
 - Lists running and paused E2B sandboxes in a submenu.
-- Shows sandbox display name, state, resource summary, short ID, expiration time, and metadata summary.
+- Shows sandbox display name, state, inline CPU/memory/disk badges, short ID, expiration time, and metadata summary.
 - Copies a sandbox ID when you click a sandbox row.
 - Shows running, paused, fetched, and API-reported totals.
-- Provides per-sandbox actions for copying logs, copying metrics, extending TTL, setting timeout, pausing, and deleting.
+- Provides per-sandbox actions for viewing logs, copying logs, copying metrics, extending TTL, setting timeout, pausing, and deleting.
+- Hides destructive Pause and Delete actions unless you enable them in Settings.
+- Opens a logs panel with search, level filtering, refresh, and copy-visible-logs.
+- Checks GitHub Releases for updates and can download/install the latest DMG.
+- Can notify you before sandboxes expire.
 - Supports state filters for running, paused, or both.
 - Supports an E2B metadata filter.
 - Refreshes on a configurable interval.
@@ -46,9 +50,9 @@ The menu includes:
 
 The Settings window includes:
 
-- General: state filter, metadata filter, refresh interval, launch at login, refresh, dashboard link.
+- General: state filter, metadata filter, refresh interval, launch at login, expiration alerts, destructive-action visibility, refresh, dashboard link.
 - Account: credential status, API key save and clear actions, refresh, dashboard and docs links.
-- About: app purpose, version, website, source, API endpoint, storage note, and external links.
+- About: app purpose, version, update check, website, source, API endpoint, storage note, and external links.
 
 ## Requirements
 
@@ -105,6 +109,31 @@ The app sends these query parameters:
 - `nextToken`: pagination token from the `X-Next-Token` response header.
 
 Pagination is followed for up to 20 pages. The app also reads `X-Total-Running` and `X-Total-Paused` headers when E2B returns them.
+
+For visible sandbox details and actions, E2BBar also calls:
+
+```http
+GET https://api.e2b.app/sandboxes/{sandboxID}/metrics
+GET https://api.e2b.app/v2/sandboxes/{sandboxID}/logs
+POST https://api.e2b.app/sandboxes/{sandboxID}/refreshes
+POST https://api.e2b.app/sandboxes/{sandboxID}/timeout
+POST https://api.e2b.app/sandboxes/{sandboxID}/pause
+DELETE https://api.e2b.app/sandboxes/{sandboxID}
+```
+
+Inline row metrics use the latest sample from the recent metrics window and fall back to the sandbox's declared CPU, memory, and disk limits when live samples are unavailable. Logs load in a native panel with search, level filtering, refresh, and copy-visible-logs.
+
+## Updates
+
+E2BBar checks GitHub Releases from the menu bar item or the About tab:
+
+```http
+GET https://api.github.com/repos/fabriqaai/e2b-bar/releases/latest
+```
+
+If a newer tagged release includes an asset named `E2BBar.dmg`, the app can download it, mount the DMG, replace `/Applications/E2BBar.app`, and relaunch. If `/Applications` is not writable, E2BBar opens the downloaded DMG so you can install it manually.
+
+The updater compares the release tag, such as `v0.3.0`, against the bundled `CFBundleShortVersionString`.
 
 ## Run Locally
 
@@ -176,8 +205,8 @@ Only tagged runs publish a GitHub release. Manual runs still build and upload th
 Create a notarized release:
 
 ```sh
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 The release job does this on `macos-15`:
@@ -293,6 +322,8 @@ Important Swift files:
 - User E2B API keys are saved to macOS Keychain.
 - GitHub Actions secrets are only referenced by name in workflows.
 - The app calls E2B directly from the user's Mac; the landing page does not proxy API requests.
+- Update checks call GitHub directly from the user's Mac and only install from the public `E2BBar.dmg` release asset.
+- Destructive sandbox actions are hidden by default and must be enabled in Settings.
 - `local-handoff/` is ignored for local operator notes that should not enter the public repo.
 
 ## Troubleshooting
@@ -313,13 +344,21 @@ The direct DMG URL returns 404
 
 Create a tagged GitHub release and make sure the release contains an asset named `E2BBar.dmg`.
 
+Check for Updates says no install is possible
+
+Make sure the latest GitHub release is tagged higher than the app version and includes `E2BBar.dmg`. If `/Applications` is not writable, the app opens the downloaded DMG for manual installation.
+
+I do not see Pause or Delete
+
+Open Settings, go to General, and enable Show destructive actions. E2BBar hides these actions by default so accidental clicks do not kill a sandbox.
+
 The website deploy succeeds but the domain does not resolve immediately
 
 Check authoritative Cloudflare DNS first. Local resolvers can lag even after Cloudflare has the custom domain and DNS records.
 
 ## Current Scope
 
-E2BBar is intentionally small. It is meant to be a fast menu bar companion for visibility and light operations, not a full dashboard replacement. The current app lists and filters sandboxes, copies IDs/logs/metrics, extends TTLs, sets timeouts, pauses and deletes sandboxes, opens external surfaces, and keeps credentials local.
+E2BBar is intentionally small. It is meant to be a fast menu bar companion for visibility and light operations, not a full dashboard replacement. The current app lists and filters sandboxes, shows inline metrics, opens searchable logs, copies IDs/logs/metrics, extends TTLs, sets timeouts, optionally pauses and deletes sandboxes, sends expiration alerts, checks for GitHub release updates, opens external surfaces, and keeps credentials local.
 
 Useful future additions:
 
@@ -328,5 +367,4 @@ Useful future additions:
 - Per-sandbox dashboard or terminal links if E2B exposes stable URLs.
 - Search inside the menu.
 - Template or team grouping.
-- Notifications before sandbox expiration.
 - Signed Sparkle updates if distribution moves beyond GitHub Releases.

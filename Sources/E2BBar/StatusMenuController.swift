@@ -111,6 +111,12 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         self.menu.cancelTracking()
     }
 
+    @objc private func viewSandboxLogs(_ sender: NSMenuItem) {
+        guard let request = sender.representedObject as? SandboxActionRequest else { return }
+        self.model.showSandboxLogs(request.sandboxID, name: request.sandboxName)
+        self.menu.cancelTracking()
+    }
+
     @objc private func copySandboxMetrics(_ sender: NSMenuItem) {
         guard let request = sender.representedObject as? SandboxActionRequest else { return }
         Task { await self.model.copySandboxMetrics(request.sandboxID) }
@@ -139,6 +145,11 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         guard let request = sender.representedObject as? SandboxActionRequest else { return }
         guard self.confirmDeleteSandbox(request) else { return }
         Task { await self.model.deleteSandbox(request.sandboxID) }
+        self.menu.cancelTracking()
+    }
+
+    @objc private func checkForUpdates() {
+        Task { await self.model.checkForUpdates() }
         self.menu.cancelTracking()
     }
 
@@ -171,6 +182,13 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         self.menu.addItem(.separator())
         self.menu.addItem(self.actionItem("Open E2B Dashboard", action: #selector(self.openDashboard), image: "arrow.up.right.square"))
         self.menu.addItem(self.actionItem("Open E2B Docs", action: #selector(self.openDocs), image: "book"))
+        let updateItem = self.actionItem(
+            self.model.isCheckingForUpdates ? "Checking for Updates..." : "Check for Updates...",
+            action: #selector(self.checkForUpdates),
+            image: "arrow.down.circle"
+        )
+        updateItem.isEnabled = !self.model.isCheckingForUpdates
+        self.menu.addItem(updateItem)
         self.menu.addItem(self.actionItem("Settings...", action: #selector(self.openSettings), image: "gearshape"))
 
         self.menu.addItem(.separator())
@@ -232,7 +250,10 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         let header = NSMenuItem()
         header.view = MenuItemHostingView(
             rootView: AnyView(
-                SandboxRowView(sandbox: sandbox) { [weak self] in
+                SandboxRowView(
+                    sandbox: sandbox,
+                    metrics: self.model.snapshot.metrics[sandbox.sandboxID]
+                ) { [weak self] in
                     self?.model.copySandboxID(sandbox.sandboxID)
                     self?.menu.cancelTracking()
                 }
@@ -249,9 +270,15 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             request: request
         ))
         submenu.addItem(self.sandboxActionItem(
+            "View Logs",
+            action: #selector(self.viewSandboxLogs(_:)),
+            image: "doc.text.magnifyingglass",
+            request: request
+        ))
+        submenu.addItem(self.sandboxActionItem(
             "Copy Recent Logs",
             action: #selector(self.copySandboxLogs(_:)),
-            image: "doc.text.magnifyingglass",
+            image: "doc.on.doc",
             request: request
         ))
         submenu.addItem(self.sandboxActionItem(
@@ -264,22 +291,24 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         submenu.addItem(.separator())
         submenu.addItem(self.extendTTLItem(for: request))
         submenu.addItem(self.setTimeoutItem(for: request))
-        if sandbox.state == .running {
+        if self.model.destructiveActionsEnabled {
+            if sandbox.state == .running {
+                submenu.addItem(self.sandboxActionItem(
+                    "Pause Sandbox",
+                    action: #selector(self.pauseSandbox(_:)),
+                    image: "pause.circle",
+                    request: request
+                ))
+            }
+
+            submenu.addItem(.separator())
             submenu.addItem(self.sandboxActionItem(
-                "Pause Sandbox",
-                action: #selector(self.pauseSandbox(_:)),
-                image: "pause.circle",
+                "Delete Sandbox...",
+                action: #selector(self.deleteSandbox(_:)),
+                image: "trash",
                 request: request
             ))
         }
-
-        submenu.addItem(.separator())
-        submenu.addItem(self.sandboxActionItem(
-            "Delete Sandbox...",
-            action: #selector(self.deleteSandbox(_:)),
-            image: "trash",
-            request: request
-        ))
 
         self.refreshViewHeights(in: submenu, width: Metrics.sandboxMenuWidth)
         return submenu

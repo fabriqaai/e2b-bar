@@ -67,7 +67,7 @@ enum SettingsTab: CaseIterable, Hashable {
 
     static let defaultWidth: CGFloat = 560
     static let aboutWidth: CGFloat = 640
-    static let windowHeight: CGFloat = 390
+    static let windowHeight: CGFloat = 450
 
     var title: String {
         switch self {
@@ -108,6 +108,21 @@ private struct GeneralSettingsView: View {
 
             Section("Startup") {
                 Toggle("Launch E2BBar at login", isOn: self.$model.launchAtLoginEnabled)
+            }
+
+            Section("Notifications") {
+                Picker("Expiration alert", selection: self.$model.expirationAlertThreshold) {
+                    ForEach(ExpirationAlertThreshold.allCases, id: \.self) { threshold in
+                        Text(threshold.label).tag(threshold)
+                    }
+                }
+            }
+
+            Section("Safety") {
+                Toggle("Show destructive actions", isOn: self.$model.destructiveActionsEnabled)
+                Text("Pause and Delete are hidden from sandbox menus until this is enabled.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Actions") {
@@ -192,7 +207,7 @@ private struct AboutSettingsView: View {
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
                 GridRow {
                     Text("Version")
-                    Text("0.2.0")
+                    Text(Self.version)
                 }
                 GridRow {
                     Text("Website")
@@ -223,6 +238,10 @@ private struct AboutSettingsView: View {
                 Button("Releases") {
                     self.model.openReleases()
                 }
+                Button(self.model.isCheckingForUpdates ? "Checking..." : "Check for Updates") {
+                    Task { await self.model.checkForUpdates() }
+                }
+                .disabled(self.model.isCheckingForUpdates)
                 Button("E2B Docs") {
                     self.model.openDocs()
                 }
@@ -247,5 +266,9 @@ private struct AboutSettingsView: View {
                 .foregroundStyle(.green)
                 .frame(width: 44, height: 44)
         }
+    }
+
+    private static var version: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     }
 }

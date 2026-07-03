@@ -3,12 +3,14 @@ import Foundation
 struct DashboardSnapshot: Sendable {
     var sandboxes: [E2BSandbox]
     var totals: E2BListTotals
+    var metrics: [String: SandboxMetricSummary]
     var refreshedAt: Date?
     var error: String?
 
     static let empty = DashboardSnapshot(
         sandboxes: [],
         totals: E2BListTotals(),
+        metrics: [:],
         refreshedAt: nil,
         error: nil
     )
@@ -38,7 +40,7 @@ struct DashboardSnapshot: Sendable {
     }
 
     func with(error: String?) -> DashboardSnapshot {
-        DashboardSnapshot(sandboxes: sandboxes, totals: totals, refreshedAt: refreshedAt, error: error)
+        DashboardSnapshot(sandboxes: sandboxes, totals: totals, metrics: metrics, refreshedAt: refreshedAt, error: error)
     }
 }
 
@@ -254,6 +256,59 @@ struct E2BMetric: Decodable, Hashable, Sendable {
     }
 
     private static func bytes(_ value: Int64) -> String {
+        MetricFormatting.bytes(value)
+    }
+}
+
+struct SandboxMetricSummary: Hashable, Sendable {
+    var sampledAt: Date?
+    var cpuUsedPercent: Double?
+    var memoryUsedBytes: Int64?
+    var memoryTotalBytes: Int64?
+    var diskUsedBytes: Int64?
+    var diskTotalBytes: Int64?
+
+    init(metrics: [E2BMetric]) {
+        let sorted = metrics.sorted { $0.timestampUnix < $1.timestampUnix }
+        guard let latest = sorted.last else {
+            self.sampledAt = nil
+            self.cpuUsedPercent = nil
+            self.memoryUsedBytes = nil
+            self.memoryTotalBytes = nil
+            self.diskUsedBytes = nil
+            self.diskTotalBytes = nil
+            return
+        }
+        self.sampledAt = latest.timestamp ?? Date(timeIntervalSince1970: TimeInterval(latest.timestampUnix))
+        self.cpuUsedPercent = latest.cpuUsedPct
+        self.memoryUsedBytes = latest.memUsed
+        self.memoryTotalBytes = latest.memTotal
+        self.diskUsedBytes = latest.diskUsed
+        self.diskTotalBytes = latest.diskTotal
+    }
+
+    var cpuBadgeValue: String? {
+        guard let cpuUsedPercent else { return nil }
+        return MetricFormatting.percent(cpuUsedPercent, fractionDigits: 0)
+    }
+
+    var memoryBadgeValue: String? {
+        guard let memoryUsedBytes, let memoryTotalBytes, memoryTotalBytes > 0 else { return nil }
+        return "\(MetricFormatting.bytes(memoryUsedBytes))/\(MetricFormatting.bytes(memoryTotalBytes))"
+    }
+
+    var diskBadgeValue: String? {
+        guard let diskUsedBytes, let diskTotalBytes, diskTotalBytes > 0 else { return nil }
+        return "\(MetricFormatting.bytes(diskUsedBytes))/\(MetricFormatting.bytes(diskTotalBytes))"
+    }
+}
+
+enum MetricFormatting {
+    static func percent(_ value: Double, fractionDigits: Int = 1) -> String {
+        String(format: "%.\(fractionDigits)f%%", value)
+    }
+
+    static func bytes(_ value: Int64) -> String {
         let units = ["B", "KB", "MB", "GB", "TB"]
         var amount = Double(value)
         var unitIndex = 0

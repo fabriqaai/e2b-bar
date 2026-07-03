@@ -5,6 +5,7 @@ import Foundation
 final class AppModel: ObservableObject {
     @Published private(set) var snapshot = DashboardSnapshot.empty
     @Published var isRefreshing = false
+    @Published private(set) var isCheckingForUpdates = false
     @Published private(set) var credentialState = CredentialState.missing
     @Published private(set) var lastActionMessage: String?
     @Published var stateFilter: SandboxStateFilter {
@@ -28,13 +29,31 @@ final class AppModel: ObservableObject {
             updateLaunchAtLogin(enabled: launchAtLoginEnabled)
         }
     }
+    @Published var expirationAlertThreshold: ExpirationAlertThreshold {
+        didSet {
+            defaults.set(expirationAlertThreshold.rawValue, forKey: DefaultsKey.expirationAlertThreshold)
+            if expirationAlertThreshold != .off {
+                Task { await requestExpirationNotificationPermission() }
+            }
+        }
+    }
+    @Published var destructiveActionsEnabled: Bool {
+        didSet {
+            defaults.set(destructiveActionsEnabled, forKey: DefaultsKey.destructiveActionsEnabled)
+            onSnapshotChange?()
+        }
+    }
 
     var onSnapshotChange: (() -> Void)?
     var onPollIntervalChange: ((TimeInterval) -> Void)?
 
     private let defaults = UserDefaults.standard
     private let keychain = Keychain(service: "com.hancengiz.e2bbar")
+    private let updater = GitHubUpdater()
     private var cachedAPIKey: String?
+    private var sentExpirationAlertKeys = Set<String>()
+
+    private static let metricsFetchLimit = 24
 
     init() {
         let savedFilter = defaults.string(forKey: DefaultsKey.stateFilter)
@@ -45,11 +64,18 @@ final class AppModel: ObservableObject {
         if let savedLaunchAtLogin = defaults.object(forKey: DefaultsKey.launchAtLoginEnabled) as? Bool {
             launchAtLoginEnabled = savedLaunchAtLogin
         } else {
-            launchAtLoginEnabled = LaunchAtLoginManager.isEnabled
-            defaults.set(launchAtLoginEnabled, forKey: DefaultsKey.launchAtLoginEnabled)
+            let detectedLaunchAtLogin = LaunchAtLoginManager.isEnabled
+            launchAtLoginEnabled = detectedLaunchAtLogin
+            UserDefaults.standard.set(detectedLaunchAtLogin, forKey: DefaultsKey.launchAtLoginEnabled)
         }
+        let savedThreshold = defaults.integer(forKey: DefaultsKey.expirationAlertThreshold)
+        expirationAlertThreshold = ExpirationAlertThreshold(rawValue: savedThreshold) ?? .off
+        destructiveActionsEnabled = defaults.object(forKey: DefaultsKey.destructiveActionsEnabled) as? Bool ?? false
         updateLaunchAtLogin(enabled: launchAtLoginEnabled)
         reloadCredentialState()
+        if expirationAlertThreshold != .off {
+            Task { await requestExpirationNotificationPermission() }
+        }
     }
 
     func refresh() async {
@@ -72,12 +98,15 @@ final class AppModel: ObservableObject {
                     return (lhs.endAt ?? .distantFuture) < (rhs.endAt ?? .distantFuture)
                 }
             }
+            let metrics = await fetchMetricSummaries(client: client, sandboxes: sortedSandboxes)
             apply(DashboardSnapshot(
                 sandboxes: sortedSandboxes,
                 totals: result.totals,
+                metrics: metrics,
                 refreshedAt: Date(),
                 error: nil
             ))
+            await notifyExpiringSandboxes(sortedSandboxes)
         } catch {
             apply(snapshot.with(error: Self.errorMessage(error)))
         }
@@ -129,6 +158,60 @@ final class AppModel: ObservableObject {
 
     func openReleases() {
         open("https://github.com/fabriqaai/e2b-bar/releases")
+    }
+
+    func showSandboxLogs(_ sandboxID: String, name: String) {
+        LogsWindowController.shared.show(sandboxID: sandboxID, sandboxName: name) { [weak self] in
+            guard let self else { throw AppError.missingAPIKey }
+            return try self.currentAPIKey()
+        }
+    }
+
+    func checkForUpdates() async {
+        guard !isCheckingForUpdates else { return }
+        setCheckingForUpdates(true)
+        defer { setCheckingForUpdates(false) }
+
+        do {
+            let result = try await updater.checkForUpdate(currentVersion: Self.currentAppVersion)
+            switch result {
+            case .upToDate(let currentVersion, _):
+                setActionMessage("E2BBar is up to date (\(currentVersion))")
+            case .available(let update):
+                switch promptForUpdate(update) {
+                case .install:
+                    setActionMessage("Downloading E2BBar \(update.release.versionString)...")
+                    let installResult = try await updater.downloadAndInstall(update)
+                    switch installResult {
+                    case .scheduledRelaunch(let version):
+                        setActionMessage("Installing E2BBar \(version) and relaunching")
+                        NSApp.terminate(nil)
+                    case .manual(let dmgURL, let reason):
+                        NSWorkspace.shared.open(dmgURL)
+                        setActionMessage("Downloaded update; install manually from the DMG (\(reason))")
+                    }
+                case .releaseNotes:
+                    NSWorkspace.shared.open(update.release.htmlURL)
+                    setActionMessage("Opened release notes for E2BBar \(update.release.versionString)")
+                case .cancel:
+                    setActionMessage("Update \(update.release.versionString) is available")
+                }
+            }
+        } catch {
+            apply(snapshot.with(error: "Update check: \(Self.errorMessage(error))"))
+        }
+    }
+
+    func requestExpirationNotificationPermission() async {
+        guard expirationAlertThreshold != .off else { return }
+        do {
+            let allowed = try await ExpirationNotifier.requestAuthorization()
+            if !allowed {
+                setActionMessage("macOS notifications are disabled for expiration alerts")
+            }
+        } catch {
+            apply(snapshot.with(error: "Notifications: \(Self.errorMessage(error))"))
+        }
     }
 
     func copySandboxID(_ sandboxID: String) {
@@ -228,6 +311,49 @@ final class AppModel: ObservableObject {
         E2BClient(apiKey: try currentAPIKey())
     }
 
+    private func fetchMetricSummaries(
+        client: E2BClient,
+        sandboxes: [E2BSandbox]
+    ) async -> [String: SandboxMetricSummary] {
+        guard !sandboxes.isEmpty else { return [:] }
+
+        let end = Int64(Date().timeIntervalSince1970)
+        let start = end - 5 * 60
+        var summaries: [String: SandboxMetricSummary] = [:]
+
+        for sandbox in sandboxes.prefix(Self.metricsFetchLimit) {
+            do {
+                let metrics = try await client.getSandboxMetrics(sandboxID: sandbox.sandboxID, start: start, end: end)
+                guard !metrics.isEmpty else { continue }
+                summaries[sandbox.sandboxID] = SandboxMetricSummary(metrics: metrics)
+            } catch {
+                continue
+            }
+        }
+        return summaries
+    }
+
+    private func notifyExpiringSandboxes(_ sandboxes: [E2BSandbox]) async {
+        guard let seconds = expirationAlertThreshold.seconds else { return }
+        let now = Date()
+        let threshold = TimeInterval(seconds)
+
+        for sandbox in sandboxes {
+            guard let endAt = sandbox.endAt else { continue }
+            let remaining = endAt.timeIntervalSince(now)
+            guard remaining > 0, remaining <= threshold else { continue }
+
+            let key = "\(sandbox.sandboxID)|\(Int(endAt.timeIntervalSince1970))|\(seconds)"
+            guard !sentExpirationAlertKeys.contains(key) else { continue }
+            sentExpirationAlertKeys.insert(key)
+            try? await ExpirationNotifier.notifySandboxExpiring(
+                sandbox: sandbox,
+                remaining: remaining,
+                threshold: expirationAlertThreshold
+            )
+        }
+    }
+
     private func reloadCredentialState() {
         do {
             if let key = try keychain.get(account: KeychainAccount.apiKey), !key.isEmpty {
@@ -263,6 +389,11 @@ final class AppModel: ObservableObject {
 
     private func setActionMessage(_ message: String) {
         lastActionMessage = message
+        onSnapshotChange?()
+    }
+
+    private func setCheckingForUpdates(_ value: Bool) {
+        isCheckingForUpdates = value
         onSnapshotChange?()
     }
 
@@ -320,6 +451,39 @@ final class AppModel: ObservableObject {
         guard !suffix.isEmpty else { return false }
         return suffix.allSatisfy { character in
             character.isHexDigit
+        }
+    }
+
+    private static var currentAppVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+    }
+
+    private enum UpdatePromptChoice {
+        case install
+        case releaseNotes
+        case cancel
+    }
+
+    private func promptForUpdate(_ update: UpdateCandidate) -> UpdatePromptChoice {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "E2BBar \(update.release.versionString) is available"
+        alert.informativeText = """
+        Current version: \(update.currentVersion)
+        Download: \(update.asset.name) (\(update.asset.sizeLabel))
+        """
+        alert.addButton(withTitle: "Download & Install")
+        alert.addButton(withTitle: "Release Notes")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            return .install
+        case .alertSecondButtonReturn:
+            return .releaseNotes
+        default:
+            return .cancel
         }
     }
 }
@@ -382,6 +546,8 @@ enum DefaultsKey {
     static let metadataFilter = "metadataFilter"
     static let pollInterval = "pollInterval"
     static let launchAtLoginEnabled = "launchAtLoginEnabled"
+    static let expirationAlertThreshold = "expirationAlertThreshold"
+    static let destructiveActionsEnabled = "destructiveActionsEnabled"
 }
 
 enum KeychainAccount {

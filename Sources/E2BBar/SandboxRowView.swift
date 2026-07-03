@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SandboxRowView: View {
     let sandbox: E2BSandbox
+    let metrics: SandboxMetricSummary?
     let copy: () -> Void
 
     @Environment(\.menuItemHighlighted) private var isHighlighted
@@ -29,14 +30,15 @@ struct SandboxRowView: View {
                         .lineLimit(1)
                 }
 
-                HStack(spacing: 7) {
-                    Text(sandbox.resourceSummary)
-                        .fontWeight(.semibold)
-                        .monospacedDigit()
+                HStack(spacing: 6) {
+                    MetricBadge(title: "CPU", value: metrics?.cpuBadgeValue ?? "\(sandbox.cpuCount)c")
+                    MetricBadge(title: "MEM", value: metrics?.memoryBadgeValue ?? Self.megabytes(sandbox.memoryMB))
+                    MetricBadge(title: "DSK", value: metrics?.diskBadgeValue ?? Self.megabytes(sandbox.diskSizeMB))
 
                     if let endAt = sandbox.endAt {
                         Text("expires \(Self.relative(endAt))")
                             .monospacedDigit()
+                            .padding(.leading, 1)
                     }
                 }
                 .font(.caption)
@@ -94,9 +96,39 @@ struct SandboxRowView: View {
         relativeFormatter.localizedString(for: date, relativeTo: Date())
     }
 
+    private static func megabytes(_ value: Int) -> String {
+        MetricFormatting.bytes(Int64(value) * 1024 * 1024)
+    }
+
     private static let relativeFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return formatter
     }()
+}
+
+private struct MetricBadge: View {
+    let title: String
+    let value: String
+
+    @Environment(\.menuItemHighlighted) private var isHighlighted
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Text(title)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(MenuHighlightStyle.tertiary(isHighlighted))
+            Text(value)
+                .font(.caption.monospacedDigit().weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+        .padding(.vertical, 2)
+        .padding(.horizontal, 5)
+        .background(background, in: RoundedRectangle(cornerRadius: 5))
+    }
+
+    private var background: Color {
+        isHighlighted ? .white.opacity(0.14) : .secondary.opacity(0.1)
+    }
 }
