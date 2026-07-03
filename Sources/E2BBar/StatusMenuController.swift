@@ -117,6 +117,24 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         self.menu.cancelTracking()
     }
 
+    @objc private func showSandboxInspector(_ sender: NSMenuItem) {
+        guard let request = sender.representedObject as? SandboxActionRequest else { return }
+        self.model.showSandboxInspector(request.sandboxID, name: request.sandboxName)
+        self.menu.cancelTracking()
+    }
+
+    @objc private func openSandboxPort(_ sender: NSMenuItem) {
+        guard let request = sender.representedObject as? SandboxActionRequest else { return }
+        self.model.openSandboxPort(request.sandboxID, port: request.seconds)
+        self.menu.cancelTracking()
+    }
+
+    @objc private func copySandboxPortURL(_ sender: NSMenuItem) {
+        guard let request = sender.representedObject as? SandboxActionRequest else { return }
+        self.model.copySandboxPortURL(request.sandboxID, port: request.seconds)
+        self.menu.cancelTracking()
+    }
+
     @objc private func copySandboxMetrics(_ sender: NSMenuItem) {
         guard let request = sender.representedObject as? SandboxActionRequest else { return }
         Task { await self.model.copySandboxMetrics(request.sandboxID) }
@@ -165,6 +183,10 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         self.menu.addItem(self.disabledItem("Running: \(self.model.snapshot.runningCount)"))
         self.menu.addItem(self.disabledItem("Paused: \(self.model.snapshot.pausedCount)"))
         self.menu.addItem(self.disabledItem("API: \(self.model.snapshot.totals.debugSummary)"))
+        if self.model.lifecycleEventsEnabled {
+            let eventTitle = self.model.lastLifecycleEvent.map { "Events: \($0.displaySummary)" } ?? "Events: watching lifecycle"
+            self.menu.addItem(self.wrappingDisabledItem(eventTitle))
+        }
         if let refreshedAt = self.model.snapshot.refreshedAt {
             self.menu.addItem(self.disabledItem("Updated: \(refreshedAt.formatted(date: .omitted, time: .standard))"))
         }
@@ -276,6 +298,12 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             request: request
         ))
         submenu.addItem(self.sandboxActionItem(
+            "Details & Tools...",
+            action: #selector(self.showSandboxInspector(_:)),
+            image: "wrench.and.screwdriver",
+            request: request
+        ))
+        submenu.addItem(self.sandboxActionItem(
             "Copy Recent Logs",
             action: #selector(self.copySandboxLogs(_:)),
             image: "doc.on.doc",
@@ -289,6 +317,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         ))
 
         submenu.addItem(.separator())
+        submenu.addItem(self.portURLsItem(for: request))
         submenu.addItem(self.extendTTLItem(for: request))
         submenu.addItem(self.setTimeoutItem(for: request))
         if self.model.destructiveActionsEnabled {
@@ -312,6 +341,39 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
         self.refreshViewHeights(in: submenu, width: Metrics.sandboxMenuWidth)
         return submenu
+    }
+
+    private func portURLsItem(for request: SandboxActionRequest) -> NSMenuItem {
+        let item = NSMenuItem(title: "Port URLs", action: nil, keyEquivalent: "")
+        item.image = NSImage(systemSymbolName: "safari", accessibilityDescription: nil)
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+
+        for port in [3000, 8000, 8080] {
+            let portRequest = SandboxActionRequest(
+                sandboxID: request.sandboxID,
+                sandboxName: request.sandboxName,
+                seconds: port
+            )
+            submenu.addItem(self.sandboxActionItem(
+                "Open :\(port)",
+                action: #selector(self.openSandboxPort(_:)),
+                image: "arrow.up.right.square",
+                request: portRequest
+            ))
+            submenu.addItem(self.sandboxActionItem(
+                "Copy :\(port) URL",
+                action: #selector(self.copySandboxPortURL(_:)),
+                image: "doc.on.doc",
+                request: portRequest
+            ))
+            if port != 8080 {
+                submenu.addItem(.separator())
+            }
+        }
+
+        item.submenu = submenu
+        return item
     }
 
     private func extendTTLItem(for request: SandboxActionRequest) -> NSMenuItem {
@@ -407,7 +469,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         self.timer?.invalidate()
         self.timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                await self?.model.refresh()
+                await self?.model.scheduledRefresh()
             }
         }
     }

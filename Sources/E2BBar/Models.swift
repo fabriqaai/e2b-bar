@@ -87,6 +87,11 @@ struct E2BSandbox: Decodable, Identifiable, Hashable, Sendable {
     var state: E2BSandboxState
     var envdVersion: String?
     var alias: String?
+    var envdAccessToken: String?
+    var allowInternetAccess: Bool?
+    var domain: String?
+    var network: SandboxNetwork?
+    var lifecycle: SandboxLifecycle?
     var metadata: [String: JSONValue]
     var volumeMounts: [VolumeMount]
 
@@ -152,6 +157,11 @@ struct E2BSandbox: Decodable, Identifiable, Hashable, Sendable {
         case state
         case envdVersion
         case alias
+        case envdAccessToken
+        case allowInternetAccess
+        case domain
+        case network
+        case lifecycle
         case metadata
         case volumeMounts
     }
@@ -170,8 +180,48 @@ struct E2BSandbox: Decodable, Identifiable, Hashable, Sendable {
         self.state = rawState.flatMap(E2BSandboxState.init(rawValue:)) ?? .unknown
         self.envdVersion = try container.decodeFlexibleString(keys: [.envdVersion])
         self.alias = try container.decodeFlexibleString(keys: [.alias])
+        self.envdAccessToken = try container.decodeFlexibleString(keys: [.envdAccessToken])
+        self.allowInternetAccess = try container.decodeIfPresent(Bool.self, forKey: .allowInternetAccess)
+        self.domain = try container.decodeFlexibleString(keys: [.domain])
+        self.network = try container.decodeIfPresent(SandboxNetwork.self, forKey: .network)
+        self.lifecycle = try container.decodeIfPresent(SandboxLifecycle.self, forKey: .lifecycle)
         self.metadata = try container.decodeIfPresent([String: JSONValue].self, forKey: .metadata) ?? [:]
         self.volumeMounts = try container.decodeIfPresent([VolumeMount].self, forKey: .volumeMounts) ?? []
+    }
+}
+
+struct SandboxNetwork: Codable, Hashable, Sendable {
+    var allowPublicTraffic: Bool?
+    var allowOut: [String]?
+    var denyOut: [String]?
+    var egressProxy: EgressProxy?
+    var maskRequestHost: String?
+    var rules: [String: JSONValue]?
+}
+
+struct EgressProxy: Codable, Hashable, Sendable {
+    var address: String?
+    var username: String?
+    var password: String?
+}
+
+struct SandboxLifecycle: Codable, Hashable, Sendable {
+    var autoResume: Bool?
+}
+
+struct SandboxNetworkUpdate: Encodable, Sendable {
+    var allowOut: [String]?
+    var denyOut: [String]?
+    var egressProxy: EgressProxy?
+    var rules: [String: JSONValue]?
+    var allowInternetAccess: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case allowOut
+        case denyOut
+        case egressProxy
+        case rules
+        case allowInternetAccess = "allow_internet_access"
     }
 }
 
@@ -300,6 +350,270 @@ struct SandboxMetricSummary: Hashable, Sendable {
     var diskBadgeValue: String? {
         guard let diskUsedBytes, let diskTotalBytes, diskTotalBytes > 0 else { return nil }
         return "\(MetricFormatting.bytes(diskUsedBytes))/\(MetricFormatting.bytes(diskTotalBytes))"
+    }
+}
+
+struct E2BBatchMetricsResponse: Decodable, Sendable {
+    var sandboxes: [String: [E2BMetric]]
+
+    enum CodingKeys: String, CodingKey {
+        case sandboxes
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let raw = try container.decode([String: E2BMetricSeries].self, forKey: .sandboxes)
+        self.sandboxes = raw.mapValues(\.metrics)
+    }
+}
+
+private struct E2BMetricSeries: Decodable {
+    var metrics: [E2BMetric]
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let metrics = try? container.decode([E2BMetric].self) {
+            self.metrics = metrics
+            return
+        }
+        if let wrapper = try? container.decode(Wrapper.self) {
+            self.metrics = wrapper.metrics
+            return
+        }
+        if let latest = try? container.decode(E2BMetric.self) {
+            self.metrics = [latest]
+            return
+        }
+        self.metrics = []
+    }
+
+    private struct Wrapper: Decodable {
+        var metrics: [E2BMetric]
+    }
+}
+
+struct E2BTeamMetric: Decodable, Hashable, Sendable {
+    var timestamp: Date?
+    var timestampUnix: Int64
+    var concurrentSandboxes: Int
+    var sandboxStartRate: Double
+
+    enum CodingKeys: String, CodingKey {
+        case timestamp
+        case timestampUnix
+        case concurrentSandboxes
+        case sandboxStartRate
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let rawTimestamp = try container.decodeIfPresent(String.self, forKey: .timestamp) {
+            self.timestamp = DateParsing.parse(rawTimestamp)
+        } else {
+            self.timestamp = nil
+        }
+        self.timestampUnix = try container.decodeIfPresent(Int64.self, forKey: .timestampUnix) ?? 0
+        self.concurrentSandboxes = try container.decodeIfPresent(Int.self, forKey: .concurrentSandboxes) ?? 0
+        self.sandboxStartRate = try container.decodeIfPresent(Double.self, forKey: .sandboxStartRate) ?? 0
+    }
+}
+
+struct E2BTeamMetricMax: Decodable, Hashable, Sendable {
+    var timestamp: Date?
+    var timestampUnix: Int64
+    var value: Double
+
+    enum CodingKeys: String, CodingKey {
+        case timestamp
+        case timestampUnix
+        case value
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let rawTimestamp = try container.decodeIfPresent(String.self, forKey: .timestamp) {
+            self.timestamp = DateParsing.parse(rawTimestamp)
+        } else {
+            self.timestamp = nil
+        }
+        self.timestampUnix = try container.decodeIfPresent(Int64.self, forKey: .timestampUnix) ?? 0
+        self.value = try container.decodeIfPresent(Double.self, forKey: .value) ?? 0
+    }
+}
+
+struct TeamUsageSummary: Hashable, Sendable {
+    var teamID: String
+    var windowStart: Date
+    var windowEnd: Date
+    var samples: [E2BTeamMetric]
+    var maxConcurrent: E2BTeamMetricMax?
+    var maxStartRate: E2BTeamMetricMax?
+
+    var latest: E2BTeamMetric? {
+        samples.sorted { $0.timestampUnix < $1.timestampUnix }.last
+    }
+}
+
+enum TeamMetricName: String, Sendable {
+    case concurrentSandboxes = "concurrent_sandboxes"
+    case sandboxStartRate = "sandbox_start_rate"
+}
+
+struct FileEntryInfo: Decodable, Identifiable, Hashable, Sendable {
+    var name: String
+    var path: String
+    var size: Int64
+    var mode: Int?
+    var permissions: String?
+    var owner: String?
+    var group: String?
+    var modifiedTime: Date?
+    var symlinkTarget: String?
+    var metadata: [String: JSONValue]
+    var type: String?
+
+    var id: String { path }
+
+    var isDirectory: Bool {
+        if type == "directory" { return true }
+        if let permissions, permissions.hasPrefix("d") { return true }
+        return false
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case path
+        case size
+        case mode
+        case permissions
+        case owner
+        case group
+        case modifiedTime
+        case symlinkTarget
+        case metadata
+        case type
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        self.path = try container.decodeIfPresent(String.self, forKey: .path) ?? self.name
+        self.size = try container.decodeIfPresent(Int64.self, forKey: .size) ?? 0
+        self.mode = try container.decodeIfPresent(Int.self, forKey: .mode)
+        self.permissions = try container.decodeIfPresent(String.self, forKey: .permissions)
+        self.owner = try container.decodeIfPresent(String.self, forKey: .owner)
+        self.group = try container.decodeIfPresent(String.self, forKey: .group)
+        if let rawModified = try container.decodeIfPresent(String.self, forKey: .modifiedTime) {
+            self.modifiedTime = DateParsing.parse(rawModified)
+        } else {
+            self.modifiedTime = nil
+        }
+        self.symlinkTarget = try container.decodeIfPresent(String.self, forKey: .symlinkTarget)
+        self.metadata = try container.decodeIfPresent([String: JSONValue].self, forKey: .metadata) ?? [:]
+        self.type = try container.decodeIfPresent(String.self, forKey: .type)
+    }
+}
+
+struct FileListResponse: Decodable, Sendable {
+    var entries: [FileEntryInfo]
+}
+
+struct FileStatResponse: Decodable, Sendable {
+    var entry: FileEntryInfo
+}
+
+struct FileMoveResponse: Decodable, Sendable {
+    var entry: FileEntryInfo
+}
+
+struct FileUploadResponse: Decodable, Sendable {
+    var files: [FileEntryInfo]
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.files = try container.decode([FileEntryInfo].self)
+    }
+}
+
+struct E2BProcessConfig: Codable, Hashable, Sendable {
+    var cmd: String
+    var args: [String]
+    var envs: [String: String]?
+    var cwd: String?
+}
+
+struct E2BProcessInfo: Decodable, Identifiable, Hashable, Sendable {
+    var config: E2BProcessConfig
+    var pid: Int
+    var tag: String?
+
+    var id: Int { pid }
+}
+
+struct E2BProcessListResponse: Decodable, Sendable {
+    var processes: [E2BProcessInfo]
+}
+
+struct E2BSandboxEvent: Decodable, Identifiable, Hashable, Sendable {
+    var version: String?
+    var id: String
+    var type: String
+    var eventData: JSONValue?
+    var sandboxBuildID: String?
+    var sandboxExecutionID: String?
+    var sandboxID: String?
+    var sandboxTeamID: String?
+    var sandboxTemplateID: String?
+    var timestamp: Date?
+
+    var displaySummary: String {
+        [type, sandboxID].compactMap { value in
+            guard let value, !value.isEmpty else { return nil }
+            return value
+        }.joined(separator: " ")
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case version
+        case id
+        case type
+        case eventData
+        case eventDataSnake = "event_data"
+        case sandboxBuildID
+        case sandboxBuildId
+        case sandboxBuildIDSnake = "sandbox_build_id"
+        case sandboxExecutionID
+        case sandboxExecutionId
+        case sandboxExecutionIDSnake = "sandbox_execution_id"
+        case sandboxID
+        case sandboxId
+        case sandboxIDSnake = "sandbox_id"
+        case sandboxTeamID
+        case sandboxTeamId
+        case sandboxTeamIDSnake = "sandbox_team_id"
+        case sandboxTemplateID
+        case sandboxTemplateId
+        case sandboxTemplateIDSnake = "sandbox_template_id"
+        case timestamp
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.version = try container.decodeIfPresent(String.self, forKey: .version)
+        self.id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+        self.type = try container.decodeIfPresent(String.self, forKey: .type) ?? "sandbox.lifecycle.unknown"
+        self.eventData = try container.decodeIfPresent(JSONValue.self, forKey: .eventData)
+            ?? container.decodeIfPresent(JSONValue.self, forKey: .eventDataSnake)
+        self.sandboxBuildID = try container.decodeFlexibleString(keys: [.sandboxBuildID, .sandboxBuildId, .sandboxBuildIDSnake])
+        self.sandboxExecutionID = try container.decodeFlexibleString(keys: [.sandboxExecutionID, .sandboxExecutionId, .sandboxExecutionIDSnake])
+        self.sandboxID = try container.decodeFlexibleString(keys: [.sandboxID, .sandboxId, .sandboxIDSnake])
+        self.sandboxTeamID = try container.decodeFlexibleString(keys: [.sandboxTeamID, .sandboxTeamId, .sandboxTeamIDSnake])
+        self.sandboxTemplateID = try container.decodeFlexibleString(keys: [.sandboxTemplateID, .sandboxTemplateId, .sandboxTemplateIDSnake])
+        if let rawTimestamp = try container.decodeIfPresent(String.self, forKey: .timestamp) {
+            self.timestamp = DateParsing.parse(rawTimestamp)
+        } else {
+            self.timestamp = nil
+        }
     }
 }
 

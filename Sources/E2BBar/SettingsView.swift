@@ -15,6 +15,9 @@ struct SettingsView: View {
             AccountSettingsView(model: self.model)
                 .tabItem { Label("Account", systemImage: "key") }
                 .tag(SettingsTab.account)
+            UsageSettingsView(model: self.model)
+                .tabItem { Label("Usage", systemImage: "chart.line.uptrend.xyaxis") }
+                .tag(SettingsTab.usage)
             AboutSettingsView(model: self.model)
                 .tabItem { Label("About", systemImage: "info.circle") }
                 .tag(SettingsTab.about)
@@ -63,22 +66,29 @@ struct SettingsView: View {
 enum SettingsTab: CaseIterable, Hashable {
     case general
     case account
+    case usage
     case about
 
     static let defaultWidth: CGFloat = 560
     static let aboutWidth: CGFloat = 640
-    static let windowHeight: CGFloat = 450
+    static let windowHeight: CGFloat = 470
 
     var title: String {
         switch self {
         case .general: "General"
         case .account: "Account"
+        case .usage: "Usage"
         case .about: "About"
         }
     }
 
     var preferredWidth: CGFloat {
-        self == .about ? Self.aboutWidth : Self.defaultWidth
+        switch self {
+        case .about, .usage:
+            Self.aboutWidth
+        case .general, .account:
+            Self.defaultWidth
+        }
     }
 
     var preferredHeight: CGFloat {
@@ -115,6 +125,23 @@ private struct GeneralSettingsView: View {
                     ForEach(ExpirationAlertThreshold.allCases, id: \.self) { threshold in
                         Text(threshold.label).tag(threshold)
                     }
+                }
+            }
+
+            Section("Lifecycle Events") {
+                Toggle("Use lifecycle events between full refreshes", isOn: self.$model.lifecycleEventsEnabled)
+                if let event = self.model.lastLifecycleEvent {
+                    Text(event.displaySummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if let error = self.model.lifecycleEventsError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Menu-open refreshes still use the full sandbox list; scheduled ticks check lifecycle events first.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -180,6 +207,85 @@ private struct AccountSettingsView: View {
         }
         .formStyle(.grouped)
         .padding(20)
+    }
+}
+
+private struct UsageSettingsView: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        Form {
+            Section("Team") {
+                TextField("Team ID", text: self.$model.teamID)
+                HStack {
+                    Button("Refresh Usage") {
+                        Task { await self.model.refreshTeamUsage() }
+                    }
+                    .disabled(self.model.isRefreshingTeamUsage || self.model.teamID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button("Open Dashboard") {
+                        self.model.openDashboard()
+                    }
+                }
+            }
+
+            Section("Last 24 Hours") {
+                if let usage = self.model.teamUsage {
+                    Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
+                        GridRow {
+                            Text("Latest concurrent")
+                            Text("\(usage.latest?.concurrentSandboxes ?? 0)")
+                                .monospacedDigit()
+                        }
+                        GridRow {
+                            Text("Latest start rate")
+                            Text(Self.rate(usage.latest?.sandboxStartRate))
+                                .monospacedDigit()
+                        }
+                        GridRow {
+                            Text("Max concurrent")
+                            Text(Self.number(usage.maxConcurrent?.value))
+                                .monospacedDigit()
+                        }
+                        GridRow {
+                            Text("Max start rate")
+                            Text(Self.rate(usage.maxStartRate?.value))
+                                .monospacedDigit()
+                        }
+                        GridRow {
+                            Text("Samples")
+                            Text("\(usage.samples.count)")
+                                .monospacedDigit()
+                        }
+                        GridRow {
+                            Text("Window")
+                            Text("\(usage.windowStart.formatted(date: .omitted, time: .shortened)) - \(usage.windowEnd.formatted(date: .omitted, time: .shortened))")
+                        }
+                    }
+                    .font(.callout)
+                } else if let error = self.model.teamUsageError {
+                    Text(error)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("No usage loaded")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .padding(20)
+    }
+
+    private static func number(_ value: Double?) -> String {
+        guard let value else { return "--" }
+        if value.rounded() == value {
+            return "\(Int(value))"
+        }
+        return String(format: "%.2f", value)
+    }
+
+    private static func rate(_ value: Double?) -> String {
+        guard let value else { return "--" }
+        return "\(String(format: "%.2f", value * 60))/min"
     }
 }
 

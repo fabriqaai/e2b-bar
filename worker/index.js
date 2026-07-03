@@ -2,6 +2,7 @@ const REPO_URL = "https://github.com/fabriqaai/e2b-bar";
 const RELEASES_URL = `${REPO_URL}/releases`;
 const LATEST_DMG_URL = `${REPO_URL}/releases/latest/download/E2BBar.dmg`;
 const CANONICAL_HOST = "e2b.bar";
+const SCREENSHOT_URL = "https://e2b.bar/screenshot.webp";
 const REDIRECT_HOSTS = new Set(["www.e2b.bar", "e2bbar.app", "www.e2bbar.app"]);
 
 export default {
@@ -47,14 +48,16 @@ function renderPage() {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>E2BBar - E2B sandboxes in your macOS menu bar</title>
-    <meta name="description" content="A tiny open-source macOS menu bar app for watching E2B sandboxes, inline metrics, searchable logs, expiration alerts, and GitHub release updates." />
+    <meta name="description" content="A tiny open-source macOS menu bar app for watching E2B sandboxes, lifecycle events, inline metrics, logs, files, processes, ports, and network controls." />
     <meta name="theme-color" content="#f7f5ef" />
     <link rel="canonical" href="https://e2b.bar/" />
     <meta property="og:title" content="E2BBar" />
     <meta property="og:description" content="E2B sandboxes in your macOS menu bar." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://e2b.bar/" />
-    <meta name="twitter:card" content="summary" />
+    <meta property="og:image" content="${SCREENSHOT_URL}" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="${SCREENSHOT_URL}" />
     <script type="application/ld+json">${JSON.stringify(schema()).replace(/</g, "\\u003c")}</script>
     <style>${styles()}</style>
   </head>
@@ -77,7 +80,7 @@ function renderPage() {
         <div class="copy">
           <p class="eyebrow">Open-source macOS menu bar app</p>
           <h1>E2B sandboxes, without opening another tab.</h1>
-          <p class="dek">E2BBar sits in your menu bar and shows running and paused sandboxes, inline metrics, expiration timing, searchable logs, and quick links back to the places you actually use.</p>
+          <p class="dek">E2BBar sits in your menu bar and shows running and paused sandboxes, lifecycle updates, inline metrics, expiration timing, searchable logs, file/process tools, and quick port links.</p>
           <div class="actions">
             <a class="button primary" href="/download">Download latest DMG</a>
             <a class="button secondary" href="/github">View source</a>
@@ -85,52 +88,26 @@ function renderPage() {
           <p class="fine">macOS 14+ - free and open source - GitHub Releases</p>
         </div>
 
-        <div class="menubar-demo" aria-label="E2BBar menu preview">
-          <div class="system-bar">
-            <span>Finder</span><span>File</span><span>Edit</span>
-            <strong>E2B 2</strong>
-          </div>
-          <div class="menu">
-            <div class="menu-head">
-              <span class="big">2</span>
-              <span>
-                <strong>running sandboxes</strong>
-                <small>1 paused - 4c - 2GB memory</small>
-              </span>
-              <em>OK</em>
-            </div>
-            <div class="tile-row">
-              <span><small>Fetched</small><b>3</b></span>
-              <span><small>CPU</small><b>4c</b></span>
-              <span><small>Next</small><b>18m</b></span>
-            </div>
-            <div class="row active">
-              <i></i>
-              <span><b>nextjs-agent</b><small>CPU 12% - MEM 410MB/2GB - expires in 18m</small></span>
-            </div>
-            <div class="row">
-              <i></i>
-              <span><b>qa-runner</b><small>Logs, metrics, TTL, timeout, safe actions</small></span>
-            </div>
-          </div>
-        </div>
+        <figure class="screenshot-frame" aria-label="E2BBar running on macOS">
+          <img src="/screenshot.webp" width="1500" height="1198" alt="E2BBar menu bar app showing a running E2B sandbox, inline metrics, actions, and searchable logs." />
+        </figure>
       </section>
 
       <section class="features" aria-label="Features">
         <article>
           <span>01</span>
           <h2>Watch live sandboxes</h2>
-          <p>Filter running or paused sandboxes, see CPU/memory/disk badges, and notice expiring work before it disappears.</p>
+          <p>Filter running or paused sandboxes, watch lifecycle events, see CPU/memory/disk badges, and notice expiring work before it disappears.</p>
         </article>
         <article>
           <span>02</span>
           <h2>Logs without the tab</h2>
-          <p>Open a native logs panel with search, level filtering, refresh, and copy-visible output.</p>
+          <p>Open searchable logs plus a sandbox inspector for files, process lists, shell commands, port URLs, and network controls.</p>
         </article>
         <article>
           <span>03</span>
           <h2>Small on purpose</h2>
-          <p>Keychain storage, hidden destructive actions, and release updates from GitHub without becoming a dashboard clone.</p>
+          <p>Keychain storage, hidden destructive actions, team usage, and GitHub release updates without becoming a dashboard clone.</p>
         </article>
       </section>
 
@@ -164,8 +141,9 @@ function schema() {
     name: "E2BBar",
     applicationCategory: "DeveloperApplication",
     operatingSystem: "macOS 14+",
-    description: "A macOS menu bar app for watching E2B sandboxes, inline metrics, logs, and expiration alerts.",
+    description: "A macOS menu bar app for watching E2B sandboxes, lifecycle events, inline metrics, logs, files, processes, ports, and network controls.",
     url: "https://e2b.bar",
+    image: SCREENSHOT_URL,
     downloadUrl: LATEST_DMG_URL,
     codeRepository: REPO_URL,
     license: "https://github.com/fabriqaai/e2b-bar",
@@ -305,79 +283,21 @@ h1 {
   color: var(--faint);
   font-size: 13px;
 }
-.menubar-demo {
-  transform: rotate(1.5deg);
+.screenshot-frame {
+  margin: 0;
+  width: min(54vw, 760px);
+  transform: rotate(1.2deg);
   filter: drop-shadow(var(--shadow));
+  justify-self: end;
 }
-.system-bar {
-  display: flex;
-  gap: 18px;
-  align-items: center;
-  height: 36px;
-  padding: 0 16px;
-  color: rgba(255,255,255,.75);
-  background: #201d18;
-  border-radius: 10px 10px 0 0;
-  font-size: 13px;
+.screenshot-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid rgba(23,20,15,.18);
+  border-radius: 12px;
+  background: var(--white);
 }
-.system-bar strong { margin-left: auto; color: #fff; }
-.menu {
-  background: rgba(255,253,247,.96);
-  border: 1px solid var(--line);
-  border-top: 0;
-  border-radius: 0 0 10px 10px;
-  overflow: hidden;
-}
-.menu-head {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 14px;
-  align-items: center;
-  padding: 18px;
-}
-.big {
-  font-size: 46px;
-  line-height: 1;
-  font-weight: 760;
-  font-variant-numeric: tabular-nums;
-}
-.menu small { display: block; color: var(--muted); margin-top: 2px; }
-.menu em {
-  font-style: normal;
-  color: var(--green-deep);
-  background: rgba(22,138,90,.12);
-  border-radius: 999px;
-  padding: 4px 8px;
-  font-size: 12px;
-  font-weight: 800;
-}
-.tile-row {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  padding: 0 14px 14px;
-}
-.tile-row span {
-  padding: 9px 10px;
-  background: rgba(23,20,15,.06);
-  border-radius: 7px;
-}
-.tile-row b { font-variant-numeric: tabular-nums; }
-.row {
-  display: grid;
-  grid-template-columns: 12px 1fr;
-  gap: 11px;
-  padding: 13px 18px;
-  border-top: 1px solid var(--line);
-}
-.row i {
-  width: 10px;
-  height: 10px;
-  margin-top: 5px;
-  border-radius: 999px;
-  background: var(--amber);
-}
-.row.active i { background: var(--green); }
 .features {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -434,7 +354,7 @@ footer a:hover { color: var(--ink); }
   .masthead { align-items: flex-start; gap: 18px; }
   nav { flex-wrap: wrap; justify-content: flex-end; }
   .hero { grid-template-columns: 1fr; min-height: auto; }
-  .menubar-demo { transform: none; }
+  .screenshot-frame { width: 100%; transform: none; justify-self: stretch; }
   .features { grid-template-columns: 1fr; }
   .download { grid-template-columns: 1fr; padding: 28px; }
 }
@@ -443,8 +363,6 @@ footer a:hover { color: var(--ink); }
   .masthead { flex-direction: column; }
   nav { justify-content: flex-start; }
   h1 { font-size: clamp(42px, 15vw, 70px); }
-  .system-bar span:nth-child(n+3) { display: none; }
-  .tile-row { grid-template-columns: 1fr; }
   footer { flex-wrap: wrap; }
   footer span { width: 100%; }
 }

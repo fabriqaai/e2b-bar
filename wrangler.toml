@@ -2,6 +2,10 @@ name = "e2bbar-app"
 main = "worker/index.js"
 compatibility_date = "2026-07-03"
 
+[assets]
+directory = "./worker/assets"
+binding = "ASSETS"
+
 [observability]
 enabled = false
 head_sampling_rate = 1

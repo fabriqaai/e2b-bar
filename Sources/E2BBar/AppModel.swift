@@ -43,6 +43,20 @@ final class AppModel: ObservableObject {
             onSnapshotChange?()
         }
     }
+    @Published var lifecycleEventsEnabled: Bool {
+        didSet {
+            defaults.set(lifecycleEventsEnabled, forKey: DefaultsKey.lifecycleEventsEnabled)
+            onSnapshotChange?()
+        }
+    }
+    @Published var teamID: String {
+        didSet { defaults.set(teamID, forKey: DefaultsKey.teamID) }
+    }
+    @Published private(set) var teamUsage: TeamUsageSummary?
+    @Published private(set) var teamUsageError: String?
+    @Published private(set) var isRefreshingTeamUsage = false
+    @Published private(set) var lastLifecycleEvent: E2BSandboxEvent?
+    @Published private(set) var lifecycleEventsError: String?
 
     var onSnapshotChange: (() -> Void)?
     var onPollIntervalChange: ((TimeInterval) -> Void)?
@@ -52,8 +66,17 @@ final class AppModel: ObservableObject {
     private let updater = GitHubUpdater()
     private var cachedAPIKey: String?
     private var sentExpirationAlertKeys = Set<String>()
+    private var latestLifecycleEventID: String?
 
     private static let metricsFetchLimit = 24
+    private static let lifecycleEventTypes = [
+        "sandbox.lifecycle.created",
+        "sandbox.lifecycle.updated",
+        "sandbox.lifecycle.killed",
+        "sandbox.lifecycle.paused",
+        "sandbox.lifecycle.resumed",
+        "sandbox.lifecycle.checkpointed"
+    ]
 
     init() {
         let savedFilter = defaults.string(forKey: DefaultsKey.stateFilter)
@@ -71,6 +94,9 @@ final class AppModel: ObservableObject {
         let savedThreshold = defaults.integer(forKey: DefaultsKey.expirationAlertThreshold)
         expirationAlertThreshold = ExpirationAlertThreshold(rawValue: savedThreshold) ?? .off
         destructiveActionsEnabled = defaults.object(forKey: DefaultsKey.destructiveActionsEnabled) as? Bool ?? false
+        lifecycleEventsEnabled = defaults.object(forKey: DefaultsKey.lifecycleEventsEnabled) as? Bool ?? true
+        teamID = defaults.string(forKey: DefaultsKey.teamID) ?? ""
+        latestLifecycleEventID = defaults.string(forKey: DefaultsKey.latestLifecycleEventID)
         updateLaunchAtLogin(enabled: launchAtLoginEnabled)
         reloadCredentialState()
         if expirationAlertThreshold != .off {
@@ -106,9 +132,45 @@ final class AppModel: ObservableObject {
                 refreshedAt: Date(),
                 error: nil
             ))
+            await captureLifecycleBaseline(client: client)
             await notifyExpiringSandboxes(sortedSandboxes)
         } catch {
             apply(snapshot.with(error: Self.errorMessage(error)))
+        }
+    }
+
+    func scheduledRefresh() async {
+        guard lifecycleEventsEnabled else {
+            await refresh()
+            return
+        }
+
+        do {
+            let client = try currentClient()
+            let events = try await client.listSandboxEvents(types: Self.lifecycleEventTypes)
+            lifecycleEventsError = nil
+            guard let newest = events.first else {
+                await notifyExpiringVisibleSandboxes()
+                return
+            }
+
+            if latestLifecycleEventID == nil {
+                rememberLifecycleEvent(newest)
+                await notifyExpiringVisibleSandboxes()
+                return
+            }
+
+            guard newest.id != latestLifecycleEventID else {
+                await notifyExpiringVisibleSandboxes()
+                return
+            }
+
+            rememberLifecycleEvent(newest)
+            setActionMessage("Lifecycle event: \(newest.displaySummary)")
+            await refresh()
+        } catch {
+            lifecycleEventsError = Self.errorMessage(error)
+            await refresh()
         }
     }
 
@@ -164,6 +226,72 @@ final class AppModel: ObservableObject {
         LogsWindowController.shared.show(sandboxID: sandboxID, sandboxName: name) { [weak self] in
             guard let self else { throw AppError.missingAPIKey }
             return try self.currentAPIKey()
+        }
+    }
+
+    func showSandboxInspector(_ sandboxID: String, name: String) {
+        SandboxInspectorWindowController.shared.show(
+            sandboxID: sandboxID,
+            sandboxName: name,
+            apiKeyProvider: { [weak self] in
+                guard let self else { throw AppError.missingAPIKey }
+                return try self.currentAPIKey()
+            },
+            destructiveActionsProvider: { [weak self] in
+                self?.destructiveActionsEnabled ?? false
+            }
+        )
+    }
+
+    func openSandboxPort(_ sandboxID: String, port: Int) {
+        NSWorkspace.shared.open(Self.portURL(sandboxID: sandboxID, port: port))
+        setActionMessage("Opened \(shortID(sandboxID)) port \(port)")
+    }
+
+    func copySandboxPortURL(_ sandboxID: String, port: Int) {
+        copyToPasteboard(Self.portURL(sandboxID: sandboxID, port: port).absoluteString)
+        setActionMessage("Copied \(shortID(sandboxID)) port \(port) URL")
+    }
+
+    func refreshTeamUsage() async {
+        let trimmedTeamID = teamID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTeamID.isEmpty else {
+            teamUsage = nil
+            teamUsageError = "Add a team ID first"
+            return
+        }
+
+        isRefreshingTeamUsage = true
+        teamUsageError = nil
+        defer { isRefreshingTeamUsage = false }
+
+        do {
+            let client = try currentClient()
+            let end = Int64(Date().timeIntervalSince1970)
+            let start = end - 24 * 60 * 60
+            let samples = try await client.getTeamMetrics(teamID: trimmedTeamID, start: start, end: end)
+            async let maxConcurrent = client.getTeamMetricMax(
+                teamID: trimmedTeamID,
+                metric: .concurrentSandboxes,
+                start: start,
+                end: end
+            )
+            async let maxStartRate = client.getTeamMetricMax(
+                teamID: trimmedTeamID,
+                metric: .sandboxStartRate,
+                start: start,
+                end: end
+            )
+            teamUsage = TeamUsageSummary(
+                teamID: trimmedTeamID,
+                windowStart: Date(timeIntervalSince1970: TimeInterval(start)),
+                windowEnd: Date(timeIntervalSince1970: TimeInterval(end)),
+                samples: samples,
+                maxConcurrent: try? await maxConcurrent,
+                maxStartRate: try? await maxStartRate
+            )
+        } catch {
+            teamUsageError = Self.errorMessage(error)
         }
     }
 
@@ -321,16 +449,48 @@ final class AppModel: ObservableObject {
         let start = end - 5 * 60
         var summaries: [String: SandboxMetricSummary] = [:]
 
-        for sandbox in sandboxes.prefix(Self.metricsFetchLimit) {
-            do {
-                let metrics = try await client.getSandboxMetrics(sandboxID: sandbox.sandboxID, start: start, end: end)
-                guard !metrics.isEmpty else { continue }
-                summaries[sandbox.sandboxID] = SandboxMetricSummary(metrics: metrics)
-            } catch {
-                continue
+        do {
+            let ids = sandboxes.prefix(Self.metricsFetchLimit).map(\.sandboxID)
+            let batch = try await client.listSandboxMetrics(sandboxIDs: ids)
+            for (sandboxID, metrics) in batch where !metrics.isEmpty {
+                summaries[sandboxID] = SandboxMetricSummary(metrics: metrics)
+            }
+        } catch {
+            for sandbox in sandboxes.prefix(Self.metricsFetchLimit) {
+                do {
+                    let metrics = try await client.getSandboxMetrics(sandboxID: sandbox.sandboxID, start: start, end: end)
+                    guard !metrics.isEmpty else { continue }
+                    summaries[sandbox.sandboxID] = SandboxMetricSummary(metrics: metrics)
+                } catch {
+                    continue
+                }
             }
         }
         return summaries
+    }
+
+    private func captureLifecycleBaseline(client: E2BClient) async {
+        guard lifecycleEventsEnabled else { return }
+        do {
+            let events = try await client.listSandboxEvents(types: Self.lifecycleEventTypes)
+            lifecycleEventsError = nil
+            if let newest = events.first {
+                rememberLifecycleEvent(newest)
+            }
+        } catch {
+            lifecycleEventsError = Self.errorMessage(error)
+        }
+    }
+
+    private func rememberLifecycleEvent(_ event: E2BSandboxEvent) {
+        latestLifecycleEventID = event.id
+        lastLifecycleEvent = event
+        defaults.set(event.id, forKey: DefaultsKey.latestLifecycleEventID)
+        onSnapshotChange?()
+    }
+
+    private func notifyExpiringVisibleSandboxes() async {
+        await notifyExpiringSandboxes(snapshot.sandboxes)
     }
 
     private func notifyExpiringSandboxes(_ sandboxes: [E2BSandbox]) async {
@@ -458,6 +618,10 @@ final class AppModel: ObservableObject {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     }
 
+    private static func portURL(sandboxID: String, port: Int) -> URL {
+        URL(string: "https://\(port)-\(sandboxID).e2b.app")!
+    }
+
     private enum UpdatePromptChoice {
         case install
         case releaseNotes
@@ -548,6 +712,9 @@ enum DefaultsKey {
     static let launchAtLoginEnabled = "launchAtLoginEnabled"
     static let expirationAlertThreshold = "expirationAlertThreshold"
     static let destructiveActionsEnabled = "destructiveActionsEnabled"
+    static let lifecycleEventsEnabled = "lifecycleEventsEnabled"
+    static let latestLifecycleEventID = "latestLifecycleEventID"
+    static let teamID = "teamID"
 }
 
 enum KeychainAccount {

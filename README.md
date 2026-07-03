@@ -1,6 +1,6 @@
 # E2BBar
 
-E2BBar is a native macOS menu bar app for keeping an eye on your E2B sandboxes without opening the browser. It shows running and paused sandboxes, resource totals, expiration timing, metadata, and quick links to E2B places you already use.
+E2BBar is a native macOS menu bar app for keeping an eye on your E2B sandboxes without opening the browser. It shows running and paused sandboxes, inline metrics, expiration timing, lifecycle events, metadata, and quick tools for logs, files, processes, ports, and network controls.
 
 Website: https://e2b.bar
 
@@ -19,6 +19,11 @@ Source: https://github.com/fabriqaai/e2b-bar
 - Provides per-sandbox actions for viewing logs, copying logs, copying metrics, extending TTL, setting timeout, pausing, and deleting.
 - Hides destructive Pause and Delete actions unless you enable them in Settings.
 - Opens a logs panel with search, level filtering, refresh, and copy-visible-logs.
+- Opens a sandbox inspector with details, file browser, process tools, and network controls.
+- Opens or copies common public port URLs for `3000`, `8000`, and `8080`.
+- Uses batch sandbox metrics when possible instead of one metrics request per sandbox.
+- Can use lifecycle events between full refreshes to avoid polling the whole sandbox list every interval.
+- Shows a team usage mini-dashboard when you provide a team ID.
 - Checks GitHub Releases for updates and can download/install the latest DMG.
 - Can notify you before sandboxes expire.
 - Supports state filters for running, paused, or both.
@@ -50,8 +55,9 @@ The menu includes:
 
 The Settings window includes:
 
-- General: state filter, metadata filter, refresh interval, launch at login, expiration alerts, destructive-action visibility, refresh, dashboard link.
+- General: state filter, metadata filter, refresh interval, launch at login, expiration alerts, lifecycle-event polling, destructive-action visibility, refresh, dashboard link.
 - Account: credential status, API key save and clear actions, refresh, dashboard and docs links.
+- Usage: team ID, latest concurrent sandboxes, start rate, max concurrent usage, and max start rate.
 - About: app purpose, version, update check, website, source, API endpoint, storage note, and external links.
 
 ## Requirements
@@ -113,15 +119,44 @@ Pagination is followed for up to 20 pages. The app also reads `X-Total-Running` 
 For visible sandbox details and actions, E2BBar also calls:
 
 ```http
+GET https://api.e2b.app/sandboxes/metrics?sandbox_ids=...
 GET https://api.e2b.app/sandboxes/{sandboxID}/metrics
 GET https://api.e2b.app/v2/sandboxes/{sandboxID}/logs
+GET https://api.e2b.app/sandboxes/{sandboxID}
+GET https://api.e2b.app/events/sandboxes
 POST https://api.e2b.app/sandboxes/{sandboxID}/refreshes
 POST https://api.e2b.app/sandboxes/{sandboxID}/timeout
 POST https://api.e2b.app/sandboxes/{sandboxID}/pause
+PUT https://api.e2b.app/sandboxes/{sandboxID}/network
 DELETE https://api.e2b.app/sandboxes/{sandboxID}
 ```
 
-Inline row metrics use the latest sample from the recent metrics window and fall back to the sandbox's declared CPU, memory, and disk limits when live samples are unavailable. Logs load in a native panel with search, level filtering, refresh, and copy-visible-logs.
+Inline row metrics use `GET /sandboxes/metrics` for up to 100 sandbox IDs and fall back to per-sandbox metrics if needed. Logs load in a native panel with search, level filtering, refresh, and copy-visible-logs. Scheduled refreshes can check `GET /events/sandboxes` first and only refresh the full sandbox list when a lifecycle event changes.
+
+Team usage calls:
+
+```http
+GET https://api.e2b.app/teams/{teamID}/metrics
+GET https://api.e2b.app/teams/{teamID}/metrics/max
+```
+
+The sandbox inspector uses envd APIs through public sandbox URLs like `https://49983-{sandboxID}.e2b.app` for file and process tools:
+
+```http
+POST /filesystem.Filesystem/ListDir
+GET /files
+POST /files
+POST /filesystem.Filesystem/Stat
+POST /filesystem.Filesystem/Move
+POST /filesystem.Filesystem/Remove
+POST /process.Process/List
+POST /process.Process/Start
+POST /process.Process/SendInput
+POST /process.Process/CloseStdin
+POST /process.Process/SendSignal
+```
+
+File removal, process signals, and network changes stay disabled until destructive actions are enabled in Settings.
 
 ## Updates
 
@@ -133,7 +168,7 @@ GET https://api.github.com/repos/fabriqaai/e2b-bar/releases/latest
 
 If a newer tagged release includes an asset named `E2BBar.dmg`, the app can download it, mount the DMG, replace `/Applications/E2BBar.app`, and relaunch. If `/Applications` is not writable, E2BBar opens the downloaded DMG so you can install it manually.
 
-The updater compares the release tag, such as `v0.3.0`, against the bundled `CFBundleShortVersionString`.
+The updater compares the release tag, such as `v0.4.0`, against the bundled `CFBundleShortVersionString`.
 
 ## Run Locally
 
@@ -205,8 +240,8 @@ Only tagged runs publish a GitHub release. Manual runs still build and upload th
 Create a notarized release:
 
 ```sh
-git tag v0.3.0
-git push origin v0.3.0
+git tag v0.4.0
+git push origin v0.4.0
 ```
 
 The release job does this on `macos-15`:
@@ -311,8 +346,10 @@ Important Swift files:
 - `StatusMenuController.swift`: menu bar item and menu construction.
 - `AppModel.swift`: state, settings, refresh loop, credentials, app actions.
 - `E2BClient.swift`: E2B API client.
+- `EnvdClient.swift`: sandbox envd filesystem and process API client.
 - `Models.swift`: sandbox and API response models.
 - `SettingsView.swift`: General, Account, and About settings tabs.
+- `SandboxInspectorWindowController.swift`: sandbox detail, files, processes, and network tools.
 - `Keychain.swift`: Keychain persistence.
 - `LaunchAtLoginManager.swift`: launch-at-login integration.
 
@@ -323,7 +360,7 @@ Important Swift files:
 - GitHub Actions secrets are only referenced by name in workflows.
 - The app calls E2B directly from the user's Mac; the landing page does not proxy API requests.
 - Update checks call GitHub directly from the user's Mac and only install from the public `E2BBar.dmg` release asset.
-- Destructive sandbox actions are hidden by default and must be enabled in Settings.
+- Destructive sandbox, file, process, and network actions are hidden or disabled by default and must be enabled in Settings.
 - `local-handoff/` is ignored for local operator notes that should not enter the public repo.
 
 ## Troubleshooting
@@ -339,6 +376,14 @@ The API key is missing, expired, pasted with extra characters, or not an E2B sec
 The menu shows no sandboxes
 
 Check the state filter and metadata filter in Settings. The app defaults to running and paused sandboxes, but a metadata filter can narrow the list to zero.
+
+Lifecycle events do not update the list
+
+The app still refreshes fully when the menu opens. Scheduled lifecycle checks use `GET /events/sandboxes`; if that call fails, E2BBar falls back to a full refresh.
+
+File or process tools fail
+
+The sandbox must be reachable through envd on port `49983`. Secure sandboxes require the `envdAccessToken` returned by E2B. Non-secure sandboxes work without that token.
 
 The direct DMG URL returns 404
 
@@ -358,7 +403,7 @@ Check authoritative Cloudflare DNS first. Local resolvers can lag even after Clo
 
 ## Current Scope
 
-E2BBar is intentionally small. It is meant to be a fast menu bar companion for visibility and light operations, not a full dashboard replacement. The current app lists and filters sandboxes, shows inline metrics, opens searchable logs, copies IDs/logs/metrics, extends TTLs, sets timeouts, optionally pauses and deletes sandboxes, sends expiration alerts, checks for GitHub release updates, opens external surfaces, and keeps credentials local.
+E2BBar is intentionally small. It is meant to be a fast menu bar companion for visibility and light operations, not a full dashboard replacement. The current app lists and filters sandboxes, watches lifecycle events, shows inline batch metrics, opens searchable logs, opens port URLs, shows team usage, browses files, lists/runs/signals processes, edits network rules, copies IDs/logs/metrics, extends TTLs, sets timeouts, optionally pauses and deletes sandboxes, sends expiration alerts, checks for GitHub release updates, opens external surfaces, and keeps credentials local.
 
 Useful future additions:
 

@@ -50,6 +50,29 @@ struct E2BClient {
         return try JSONDecoder().decode([E2BMetric].self, from: data)
     }
 
+    func listSandboxMetrics(sandboxIDs: [String]) async throws -> [String: [E2BMetric]] {
+        let ids = sandboxIDs
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .prefix(100)
+        guard !ids.isEmpty else { return [:] }
+
+        let data = try await self.request(
+            path: "sandboxes/metrics",
+            method: "GET",
+            queryItems: [URLQueryItem(name: "sandbox_ids", value: ids.joined(separator: ","))]
+        )
+        return try JSONDecoder().decode(E2BBatchMetricsResponse.self, from: data).sandboxes
+    }
+
+    func getSandbox(sandboxID: String) async throws -> E2BSandbox {
+        let data = try await self.request(
+            path: "sandboxes/\(sandboxID)",
+            method: "GET"
+        )
+        return try JSONDecoder().decode(E2BSandbox.self, from: data)
+    }
+
     func getSandboxLogs(
         sandboxID: String,
         limit: Int = 100,
@@ -96,6 +119,80 @@ struct E2BClient {
             path: "sandboxes/\(sandboxID)",
             method: "DELETE"
         )
+    }
+
+    func updateSandboxNetwork(sandboxID: String, update: SandboxNetworkUpdate) async throws {
+        try await self.sendJSON(
+            path: "sandboxes/\(sandboxID)/network",
+            method: "PUT",
+            body: update
+        )
+    }
+
+    func getTeamMetrics(teamID: String, start: Int64, end: Int64) async throws -> [E2BTeamMetric] {
+        let data = try await self.request(
+            path: "teams/\(teamID)/metrics",
+            method: "GET",
+            queryItems: [
+                URLQueryItem(name: "start", value: "\(start)"),
+                URLQueryItem(name: "end", value: "\(end)")
+            ]
+        )
+        return try JSONDecoder().decode([E2BTeamMetric].self, from: data)
+    }
+
+    func getTeamMetricMax(
+        teamID: String,
+        metric: TeamMetricName,
+        start: Int64,
+        end: Int64
+    ) async throws -> E2BTeamMetricMax {
+        let data = try await self.request(
+            path: "teams/\(teamID)/metrics/max",
+            method: "GET",
+            queryItems: [
+                URLQueryItem(name: "start", value: "\(start)"),
+                URLQueryItem(name: "end", value: "\(end)"),
+                URLQueryItem(name: "metric", value: metric.rawValue)
+            ]
+        )
+        return try JSONDecoder().decode(E2BTeamMetricMax.self, from: data)
+    }
+
+    func listSandboxEvents(
+        limit: Int = 25,
+        orderAscending: Bool = false,
+        types: [String] = []
+    ) async throws -> [E2BSandboxEvent] {
+        var queryItems = [
+            URLQueryItem(name: "limit", value: "\(min(max(limit, 1), 100))"),
+            URLQueryItem(name: "orderAsc", value: orderAscending ? "true" : "false")
+        ]
+        for type in types where !type.isEmpty {
+            queryItems.append(URLQueryItem(name: "types", value: type))
+        }
+        let data = try await self.request(
+            path: "events/sandboxes",
+            method: "GET",
+            queryItems: queryItems
+        )
+        return try JSONDecoder().decode([E2BSandboxEvent].self, from: data)
+    }
+
+    func listSandboxEvents(
+        sandboxID: String,
+        limit: Int = 25,
+        orderAscending: Bool = false
+    ) async throws -> [E2BSandboxEvent] {
+        let data = try await self.request(
+            path: "events/sandboxes/\(sandboxID)",
+            method: "GET",
+            queryItems: [
+                URLQueryItem(name: "limit", value: "\(min(max(limit, 1), 100))"),
+                URLQueryItem(name: "orderAsc", value: orderAscending ? "true" : "false")
+            ]
+        )
+        return try JSONDecoder().decode([E2BSandboxEvent].self, from: data)
     }
 
     private func fetchPage(
