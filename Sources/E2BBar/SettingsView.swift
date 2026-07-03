@@ -72,6 +72,7 @@ enum SettingsTab: CaseIterable, Hashable {
     static let defaultWidth: CGFloat = 560
     static let aboutWidth: CGFloat = 640
     static let windowHeight: CGFloat = 470
+    static let usageHeight: CGFloat = 570
 
     var title: String {
         switch self {
@@ -92,7 +93,12 @@ enum SettingsTab: CaseIterable, Hashable {
     }
 
     var preferredHeight: CGFloat {
-        Self.windowHeight
+        switch self {
+        case .usage:
+            Self.usageHeight
+        case .general, .account, .about:
+            Self.windowHeight
+        }
     }
 }
 
@@ -252,6 +258,11 @@ private struct UsageSettingsView: View {
                                 .monospacedDigit()
                         }
                         GridRow {
+                            Text("Estimated cost today")
+                            Text(AppModel.currency(self.model.estimatedDailyCostUSD))
+                                .monospacedDigit()
+                        }
+                        GridRow {
                             Text("Samples")
                             Text("\(usage.samples.count)")
                                 .monospacedDigit()
@@ -269,6 +280,30 @@ private struct UsageSettingsView: View {
                     Text("No usage loaded")
                         .foregroundStyle(.secondary)
                 }
+            }
+
+            Section("Local Alerts") {
+                Toggle("Notify at 50%, 80%, 90%, and 100%", isOn: self.$model.usageAlertsEnabled)
+                Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 8) {
+                    GridRow {
+                        Text("Estimated daily cost")
+                        TextField("0", value: self.$model.usageDailyCostLimitUSD, format: .number.precision(.fractionLength(2)))
+                            .frame(width: 90)
+                    }
+                    GridRow {
+                        Text("Concurrent sandboxes")
+                        TextField("0", value: self.$model.usageConcurrentLimit, format: .number)
+                            .frame(width: 90)
+                    }
+                    GridRow {
+                        Text("Starts per day")
+                        TextField("0", value: self.$model.usageStartsPerDayLimit, format: .number)
+                            .frame(width: 90)
+                    }
+                }
+                Text("These are local E2BBar alerts. Estimated cost is sampled from currently running sandbox CPU/RAM and is not an E2B billing limit.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

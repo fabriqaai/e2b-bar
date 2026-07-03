@@ -449,14 +449,77 @@ struct TeamUsageSummary: Hashable, Sendable {
     var maxConcurrent: E2BTeamMetricMax?
     var maxStartRate: E2BTeamMetricMax?
 
+    var sortedSamples: [E2BTeamMetric] {
+        samples.sorted { $0.timestampUnix < $1.timestampUnix }
+    }
+
     var latest: E2BTeamMetric? {
-        samples.sorted { $0.timestampUnix < $1.timestampUnix }.last
+        sortedSamples.last
+    }
+
+    var latestConcurrent: Int {
+        latest?.concurrentSandboxes ?? 0
+    }
+
+    var peakConcurrent: Int {
+        if let maxConcurrent {
+            return Int(maxConcurrent.value.rounded())
+        }
+        return samples.map(\.concurrentSandboxes).max() ?? 0
+    }
+
+    var latestStartsPerMinute: Double {
+        (latest?.sandboxStartRate ?? 0) * 60
+    }
+
+    var peakStartsPerMinute: Double {
+        if let maxStartRate {
+            return maxStartRate.value * 60
+        }
+        return (samples.map(\.sandboxStartRate).max() ?? 0) * 60
+    }
+
+    var estimatedStartsInWindow: Int {
+        let sorted = sortedSamples
+        guard sorted.count > 1 else { return 0 }
+
+        var total = 0.0
+        for index in 1..<sorted.count {
+            let previous = sorted[index - 1]
+            let current = sorted[index]
+            let seconds = max(0, current.timestampUnix - previous.timestampUnix)
+            total += previous.sandboxStartRate * Double(seconds)
+        }
+        return Int(total.rounded())
+    }
+
+    var concurrentSeries: [Double] {
+        sortedSamples.map { Double($0.concurrentSandboxes) }
+    }
+
+    var startRateSeries: [Double] {
+        sortedSamples.map { $0.sandboxStartRate * 60 }
     }
 }
 
 enum TeamMetricName: String, Sendable {
     case concurrentSandboxes = "concurrent_sandboxes"
     case sandboxStartRate = "sandbox_start_rate"
+}
+
+enum UsageAlertLevel: Int, CaseIterable, Sendable {
+    case fifty = 50
+    case eighty = 80
+    case ninety = 90
+    case hundred = 100
+
+    var fraction: Double {
+        Double(rawValue) / 100.0
+    }
+
+    var label: String {
+        "\(rawValue)%"
+    }
 }
 
 struct FileEntryInfo: Decodable, Identifiable, Hashable, Sendable {

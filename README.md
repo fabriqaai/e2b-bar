@@ -23,7 +23,9 @@ Source: https://github.com/fabriqaai/e2b-bar
 - Opens or copies common public port URLs for `3000`, `8000`, and `8080`.
 - Uses batch sandbox metrics when possible instead of one metrics request per sandbox.
 - Can use lifecycle events between full refreshes to avoid polling the whole sandbox list every interval.
-- Shows a team usage mini-dashboard when you provide a team ID.
+- Shows a team usage mini-dashboard in the menu when you provide a team ID.
+- Shows Live concurrent, 24h starts, Peak concurrent, and Start rate with small menu bar charts.
+- Supports local usage alerts for estimated daily cost, concurrent sandboxes, and starts per day at 50%, 80%, 90%, and 100%.
 - Checks GitHub Releases for updates and can download/install the latest DMG.
 - Can notify you before sandboxes expire.
 - Supports state filters for running, paused, or both.
@@ -46,6 +48,7 @@ The menu includes:
 - API fetch totals from the E2B response headers when available.
 - Last refreshed time.
 - Error text when the latest request fails.
+- Usage section with live team metrics, tiny charts, estimated daily cost, usage dashboard link, alert configuration, and refresh usage action.
 - Sandboxes submenu.
 - Per-sandbox action menus.
 - Refresh action.
@@ -57,7 +60,7 @@ The Settings window includes:
 
 - General: state filter, metadata filter, refresh interval, launch at login, expiration alerts, lifecycle-event polling, destructive-action visibility, refresh, dashboard link.
 - Account: credential status, API key save and clear actions, refresh, dashboard and docs links.
-- Usage: team ID, latest concurrent sandboxes, start rate, max concurrent usage, and max start rate.
+- Usage: team ID, latest concurrent sandboxes, start rate, max concurrent usage, max start rate, estimated daily cost, and local alert limits.
 - About: app purpose, version, update check, website, source, API endpoint, storage note, and external links.
 
 ## Requirements
@@ -140,6 +143,15 @@ GET https://api.e2b.app/teams/{teamID}/metrics
 GET https://api.e2b.app/teams/{teamID}/metrics/max
 ```
 
+The public E2B team metrics API currently exposes concurrent sandbox count and sandbox start rate. E2BBar derives the menu usage view from those fields:
+
+- Live concurrent: latest `concurrentSandboxes` sample.
+- 24h starts: estimated from `sandboxStartRate` samples over the loaded window.
+- Peak concurrent: `GET /teams/{teamID}/metrics/max?metric=concurrent_sandboxes`.
+- Start rate: latest `sandboxStartRate` converted to starts per minute.
+
+Estimated daily cost is local to E2BBar. The app samples visible running sandboxes while it is running and estimates cost from CPU and RAM allocation using public E2B compute pricing. It is useful as an early warning, but it is not an E2B invoice, billing API result, or spending-limit control. E2B billing and official spending limits still live in the E2B dashboard.
+
 The sandbox inspector uses envd APIs through public sandbox URLs like `https://49983-{sandboxID}.e2b.app` for file and process tools:
 
 ```http
@@ -168,7 +180,7 @@ GET https://api.github.com/repos/fabriqaai/e2b-bar/releases/latest
 
 If a newer tagged release includes an asset named `E2BBar.dmg`, the app can download it, mount the DMG, replace `/Applications/E2BBar.app`, and relaunch. If `/Applications` is not writable, E2BBar opens the downloaded DMG so you can install it manually.
 
-The updater compares the release tag, such as `v0.4.1`, against the bundled `CFBundleShortVersionString`.
+The updater compares the release tag, such as `v0.5.0`, against the bundled `CFBundleShortVersionString`.
 
 ## Run Locally
 
@@ -240,8 +252,8 @@ Only tagged runs publish a GitHub release. Manual runs still build and upload th
 Create a notarized release:
 
 ```sh
-git tag v0.4.1
-git push origin v0.4.1
+git tag v0.5.0
+git push origin v0.5.0
 ```
 
 The release job does this on `macos-15`:

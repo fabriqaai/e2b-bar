@@ -70,7 +70,10 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         guard menu === self.menu else { return }
         self.rebuildMenu()
-        Task { await self.model.refresh() }
+        Task {
+            await self.model.refresh()
+            await self.model.refreshTeamUsageIfConfigured()
+        }
     }
 
     func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
@@ -92,6 +95,20 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     @objc private func openDashboard() {
         self.model.openDashboard()
         self.menu.cancelTracking()
+    }
+
+    @objc private func openUsageDashboard() {
+        self.model.openUsageDashboard()
+        self.menu.cancelTracking()
+    }
+
+    @objc private func configureUsageAlerts() {
+        SettingsOpener.shared.open()
+        self.menu.cancelTracking()
+    }
+
+    @objc private func refreshUsage() {
+        Task { await self.model.refreshTeamUsage() }
     }
 
     @objc private func openDocs() {
@@ -188,6 +205,19 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         }
 
         self.menu.addItem(.separator())
+        self.menu.addItem(self.usageItem())
+        self.menu.addItem(self.actionItem("Usage Dashboard", action: #selector(self.openUsageDashboard), image: "chart.bar.xaxis"))
+        self.menu.addItem(self.actionItem("Configure Alerts...", action: #selector(self.configureUsageAlerts), image: "bell.badge"))
+        let refreshUsageItem = self.actionItem(
+            self.model.isRefreshingTeamUsage ? "Refreshing Usage..." : "Refresh Usage",
+            action: #selector(self.refreshUsage),
+            image: "arrow.clockwise"
+        )
+        refreshUsageItem.isEnabled = !self.model.isRefreshingTeamUsage
+            && !self.model.teamID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        self.menu.addItem(refreshUsageItem)
+
+        self.menu.addItem(.separator())
         self.menu.addItem(self.sandboxesItem())
         self.menu.addItem(self.actionItem("Refresh Now", action: #selector(self.refreshNow), image: "arrow.clockwise"))
 
@@ -218,6 +248,25 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             ))
         )
         item.view = view
+        item.isEnabled = false
+        return item
+    }
+
+    private func usageItem() -> NSMenuItem {
+        let item = NSMenuItem()
+        item.view = MenuItemHostingView(
+            rootView: AnyView(UsageMenuView(
+                usage: self.model.teamUsage,
+                usageError: self.model.teamUsageError,
+                hasTeamID: !self.model.teamID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                isRefreshing: self.model.isRefreshingTeamUsage,
+                estimatedDailyCostUSD: self.model.estimatedDailyCostUSD,
+                alertsEnabled: self.model.usageAlertsEnabled,
+                concurrentLimit: self.model.usageConcurrentLimit,
+                startsLimit: self.model.usageStartsPerDayLimit,
+                costLimitUSD: self.model.usageDailyCostLimitUSD
+            ))
+        )
         item.isEnabled = false
         return item
     }
