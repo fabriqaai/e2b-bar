@@ -19,12 +19,12 @@ Source: https://github.com/fabriqaai/e2b-bar
 - Provides per-sandbox actions for viewing logs, copying logs, copying metrics, extending TTL, setting timeout, pausing, and deleting.
 - Hides destructive Pause and Delete actions unless you enable them in Settings.
 - Opens a logs panel with search, level filtering, refresh, and copy-visible-logs.
-- Opens a sandbox inspector with details, file browser, process tools, and network controls.
+- Opens a sandbox inspector with readable details, a file browser, one-off command runner, process list, and network controls.
 - Opens or copies common public port URLs for `3000`, `8000`, and `8080`.
 - Uses batch sandbox metrics when possible instead of one metrics request per sandbox.
 - Can use lifecycle events between full refreshes to avoid polling the whole sandbox list every interval.
 - Shows a team usage mini-dashboard in the menu when you provide a team ID.
-- Shows Live concurrent, estimated 24h starts, Peak concurrent, and latest start rate with labeled menu bar trends.
+- Shows Live concurrent, start rate, Peak concurrent, and peak start rate with labeled menu bar trends.
 - Opens the correct E2B usage dashboard when you configure your dashboard slug or full usage URL.
 - Checks GitHub Releases for updates and can download/install the latest DMG.
 - Can notify you before sandboxes expire.
@@ -35,7 +35,7 @@ Source: https://github.com/fabriqaai/e2b-bar
 - Stores the API key in macOS Keychain.
 - Can also read `E2B_API_KEY` from the launch environment for local development.
 - Supports launch at login through macOS ServiceManagement.
-- Provides quick links for the E2B dashboard, E2B docs, the app website, GitHub, and releases.
+- Provides quick links for the E2B dashboard, the app website, GitHub, and releases.
 
 ## Screens And Menus
 
@@ -48,11 +48,11 @@ The menu includes:
 - API fetch totals from the E2B response headers when available.
 - Last refreshed time.
 - Error text when the latest request fails.
-- Usage section with E2B-backed team metrics, labeled trends, usage dashboard link, usage settings, and refresh usage action.
+- Usage section with E2B-backed team metrics, labeled trends, and a usage dashboard link.
 - Sandboxes submenu.
 - Per-sandbox action menus.
-- Refresh action.
-- E2B dashboard and docs links.
+- Single refresh action for sandbox and usage data.
+- E2B dashboard link.
 - Settings.
 - Quit.
 
@@ -146,9 +146,9 @@ GET https://api.e2b.app/teams/{teamID}/metrics/max
 The public E2B team metrics API currently exposes concurrent sandbox count and sandbox start rate. e2b.bar derives the menu usage view from those fields:
 
 - Live concurrent: latest `concurrentSandboxes` sample.
-- Estimated 24h starts: derived from `sandboxStartRate` samples over the loaded window.
+- Start rate: latest `sandboxStartRate`, converted from starts per second to starts per minute for readability.
 - Peak concurrent: `GET /teams/{teamID}/metrics/max?metric=concurrent_sandboxes`.
-- Start rate: latest `sandboxStartRate` converted to starts per minute.
+- Peak start rate: `GET /teams/{teamID}/metrics/max?metric=sandbox_start_rate`, converted from starts per second to starts per minute for readability.
 
 e2b.bar does not estimate billing locally and does not set E2B usage limits from the app. E2B billing totals, usage-limit dollar amounts, and official billing alerts live in the E2B dashboard unless E2B exposes a billing API later.
 
@@ -170,7 +170,19 @@ POST /process.Process/CloseStdin
 POST /process.Process/SendSignal
 ```
 
+`Process/Start` is a server-streaming Connect endpoint, so e2b.bar sends and reads Connect-framed JSON instead of raw JSON. File entries from envd can encode sizes as strings, so the file browser accepts both string and numeric sizes.
+
 File removal, process signals, and network changes stay disabled until destructive actions are enabled in Settings.
+
+## Diagnostics
+
+Runtime diagnostics are written to:
+
+```text
+~/Library/Logs/e2b.bar.log
+```
+
+The inspector shows Copy Log Path and Open Logs actions when a file, process, or network operation fails. Logs include endpoint names, short sandbox IDs, error text, and a short response preview. API keys and sandbox access tokens are redacted before writing.
 
 ## Updates
 
@@ -182,7 +194,7 @@ GET https://api.github.com/repos/fabriqaai/e2b-bar/releases/latest
 
 If a newer tagged release includes an asset named `E2BBar.dmg`, the app can download it, mount the DMG, replace `/Applications/E2BBar.app`, and relaunch. If `/Applications` is not writable, e2b.bar opens the downloaded DMG so you can install it manually.
 
-The updater compares the release tag, such as `v0.5.1`, against the bundled `CFBundleShortVersionString`.
+The updater compares the release tag, such as `v0.5.2`, against the bundled `CFBundleShortVersionString`.
 
 ## Run Locally
 
@@ -254,8 +266,8 @@ Only tagged runs publish a GitHub release. Manual runs still build and upload th
 Create a notarized release:
 
 ```sh
-git tag v0.5.1
-git push origin v0.5.1
+git tag v0.5.2
+git push origin v0.5.2
 ```
 
 The release job does this on `macos-15`:

@@ -53,7 +53,7 @@ final class SandboxInspectorViewModel: ObservableObject {
     @Published private(set) var isLoadingDetail = false
     @Published private(set) var detailError: String?
 
-    @Published var filePath = "."
+    @Published var filePath = "/home/user"
     @Published private(set) var fileEntries: [FileEntryInfo] = []
     @Published var selectedFilePath: String?
     @Published private(set) var isLoadingFiles = false
@@ -62,7 +62,7 @@ final class SandboxInspectorViewModel: ObservableObject {
     @Published private(set) var processes: [E2BProcessInfo] = []
     @Published var selectedProcessID: Int?
     @Published var command = "pwd && ls -la"
-    @Published var commandCWD = "."
+    @Published var commandCWD = "/home/user"
     @Published var commandTag = "e2bbar"
     @Published var processInput = ""
     @Published private(set) var isLoadingProcesses = false
@@ -152,7 +152,9 @@ final class SandboxInspectorViewModel: ObservableObject {
         defer { isLoadingFiles = false }
 
         do {
-            let entries = try await self.envdClient().listDirectory(path: normalizedFilePath())
+            let path = normalizedFilePath()
+            filePath = path
+            let entries = try await self.envdClient().listDirectory(path: path)
             fileEntries = entries.sorted { lhs, rhs in
                 if lhs.isDirectory != rhs.isDirectory {
                     return lhs.isDirectory && !rhs.isDirectory
@@ -175,10 +177,10 @@ final class SandboxInspectorViewModel: ObservableObject {
 
     func goUpDirectory() async {
         let trimmed = normalizedFilePath()
-        guard trimmed != ".", trimmed != "/" else { return }
+        guard trimmed != "/" else { return }
         let url = URL(fileURLWithPath: trimmed)
         filePath = url.deletingLastPathComponent().path
-        if filePath.isEmpty { filePath = "." }
+        if filePath.isEmpty { filePath = "/" }
         await refreshFiles()
     }
 
@@ -216,8 +218,8 @@ final class SandboxInspectorViewModel: ObservableObject {
             guard openPanel.runModal() == .OK, let localURL = openPanel.url else { return }
 
             let remoteDirectory = normalizedFilePath()
-            let remotePath = remoteDirectory == "."
-                ? localURL.lastPathComponent
+            let remotePath = remoteDirectory == "/"
+                ? "/\(localURL.lastPathComponent)"
                 : "\(remoteDirectory)/\(localURL.lastPathComponent)"
             _ = try await self.envdClient().upload(localFile: localURL, remotePath: remotePath)
             fileMessage = "Uploaded \(localURL.lastPathComponent)"
@@ -282,12 +284,19 @@ final class SandboxInspectorViewModel: ObservableObject {
         guard !trimmed.isEmpty else { return }
 
         do {
-            processOutput = try await self.envdClient().startShellCommand(
+            let result = try await self.envdClient().startShellCommand(
                 command: trimmed,
-                cwd: commandCWD,
+                cwd: normalizedCommandCWD(),
                 tag: commandTag
             )
-            processMessage = "Started command"
+            processOutput = result.output.isEmpty ? "--" : result.output
+            if let status = result.status, !status.isEmpty {
+                processMessage = status
+            } else if let pid = result.pid {
+                processMessage = "Started process \(pid)"
+            } else {
+                processMessage = "Command finished"
+            }
             await refreshProcesses()
         } catch {
             processMessage = Self.errorMessage(error)
@@ -372,7 +381,39 @@ final class SandboxInspectorViewModel: ObservableObject {
 
     private func normalizedFilePath() -> String {
         let trimmed = filePath.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "." : trimmed
+        return Self.normalizedSandboxPath(trimmed)
+    }
+
+    private func normalizedCommandCWD() -> String {
+        Self.normalizedSandboxPath(commandCWD.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    func copyDiagnosticLogPath() {
+        AppDiagnostics.copyLogPath()
+    }
+
+    func openDiagnosticLogFolder() {
+        AppDiagnostics.openLogFolder()
+    }
+
+    func openNetworkDocs() {
+        if let url = URL(string: "https://e2b.dev/docs/api-reference/sandboxes/update-sandbox-network") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    private static func normalizedSandboxPath(_ path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == "." || trimmed == "~" {
+            return "/home/user"
+        }
+        if trimmed.hasPrefix("~/") {
+            return "/home/user/" + trimmed.dropFirst(2)
+        }
+        if trimmed.hasPrefix("/") {
+            return trimmed
+        }
+        return "/home/user/" + trimmed
     }
 
     private func copy(_ value: String) {
@@ -494,22 +535,39 @@ private struct OverviewTab: View {
                     row("Internet", Self.bool(sandbox.allowInternetAccess))
                     row("Public traffic", Self.bool(sandbox.network?.allowPublicTraffic))
                     row("Volumes", sandbox.volumeMounts.isEmpty ? "--" : sandbox.volumeMounts.map { "\($0.name):\($0.path)" }.joined(separator: ", "))
-                    row("Metadata", sandbox.metadata.isEmpty ? "--" : sandbox.metadata.map { "\($0.key)=\($0.value.shortDescription)" }.sorted().joined(separator: " "))
+                    GridRow {
+                        Text("Metadata")
+                            .foregroundStyle(.secondary)
+                        MetadataBlock(metadata: sandbox.metadata)
+                    }
                 }
                 .font(.callout)
 
                 Divider()
-                HStack {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Quick Port URLs")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("Open or copy common sandbox web-server URLs, built as https://{port}-\(viewModel.sandboxID).e2b.app.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    HStack {
                     Button("Copy ID") {
                         viewModel.copySandboxID()
                     }
                     ForEach([3000, 8000, 8080], id: \.self) { port in
-                        Button("Open :\(port)") {
+                        Button {
                             viewModel.openPort(port)
+                        } label: {
+                            Text(verbatim: "Open \(port)")
                         }
-                        Button("Copy :\(port)") {
+                        Button {
                             viewModel.copyPort(port)
+                        } label: {
+                            Text(verbatim: "Copy \(port) URL")
                         }
+                    }
                     }
                 }
             } else {
@@ -541,55 +599,103 @@ private struct OverviewTab: View {
     }
 }
 
+private struct MetadataBlock: View {
+    let metadata: [String: JSONValue]
+
+    var body: some View {
+        if metadata.isEmpty {
+            Text("--")
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(metadata.keys.sorted(), id: \.self) { key in
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(key)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                        Text(metadata[key]?.shortDescription ?? "")
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+        }
+    }
+}
+
 private struct FilesTab: View {
     @ObservedObject var viewModel: SandboxInspectorViewModel
 
     var body: some View {
         VStack(spacing: 10) {
-            HStack {
-                TextField("Path", text: self.$viewModel.filePath)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    TextField("Path", text: self.$viewModel.filePath)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit {
+                            Task { await self.viewModel.refreshFiles() }
+                        }
+                    Button("Home") {
+                        self.viewModel.filePath = "/home/user"
                         Task { await self.viewModel.refreshFiles() }
                     }
-                Button {
-                    Task { await self.viewModel.goUpDirectory() }
-                } label: {
-                    Image(systemName: "arrow.up")
+                    Button("Workspace") {
+                        self.viewModel.filePath = "/workspace"
+                        Task { await self.viewModel.refreshFiles() }
+                    }
+                    Button {
+                        Task { await self.viewModel.goUpDirectory() }
+                    } label: {
+                        Image(systemName: "arrow.up")
+                    }
+                    Button {
+                        Task { await self.viewModel.refreshFiles() }
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(self.viewModel.isLoadingFiles)
                 }
-                Button {
-                    Task { await self.viewModel.refreshFiles() }
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                }
-                .disabled(self.viewModel.isLoadingFiles)
+                Text("Browse sandbox files. Relative paths resolve under /home/user; try /workspace for mounted project data.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
-            List(selection: self.$viewModel.selectedFilePath) {
-                ForEach(self.viewModel.fileEntries) { entry in
-                    FileEntryRow(entry: entry)
-                        .tag(entry.path)
-                        .onTapGesture(count: 2) {
-                            Task { await self.viewModel.openSelectedDirectory() }
-                        }
+            if let message = self.viewModel.fileMessage {
+                InspectorMessageRow(message: message, viewModel: self.viewModel)
+            }
+
+            ZStack {
+                List(selection: self.$viewModel.selectedFilePath) {
+                    ForEach(self.viewModel.fileEntries) { entry in
+                        FileEntryRow(entry: entry)
+                            .tag(entry.path)
+                            .onTapGesture(count: 2) {
+                                Task { await self.viewModel.openSelectedDirectory() }
+                            }
+                    }
+                }
+                .listStyle(.inset)
+
+                if self.viewModel.isLoadingFiles {
+                    ProgressView("Loading files...")
+                } else if self.viewModel.fileEntries.isEmpty {
+                    ContentUnavailableView("No files shown", systemImage: "folder", description: Text("Refresh this path or try /home/user or /workspace."))
+                        .foregroundStyle(.secondary)
                 }
             }
-            .listStyle(.inset)
 
             HStack {
-                Button("Open") {
+                Button("Open Folder") {
                     Task { await self.viewModel.openSelectedDirectory() }
                 }
                 .disabled(self.viewModel.selectedFile?.isDirectory != true)
-                Button("Stat") {
+                Button("Get Info") {
                     Task { await self.viewModel.statSelected() }
                 }
                 .disabled(self.viewModel.selectedFile == nil)
-                Button("Download") {
+                Button("Download File") {
                     Task { await self.viewModel.downloadSelected() }
                 }
                 .disabled(self.viewModel.selectedFile == nil || self.viewModel.selectedFile?.isDirectory == true)
-                Button("Upload") {
+                Button("Upload Here") {
                     Task { await self.viewModel.uploadFile() }
                 }
                 Button("Move") {
@@ -601,15 +707,35 @@ private struct FilesTab: View {
                 }
                 .disabled(self.viewModel.selectedFile == nil || !self.viewModel.destructiveActionsEnabled)
                 Spacer()
-                if let message = self.viewModel.fileMessage {
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
             }
         }
         .padding(14)
+    }
+}
+
+private struct InspectorMessageRow: View {
+    let message: String
+    @ObservedObject var viewModel: SandboxInspectorViewModel
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            Spacer()
+            Button("Copy Log Path") {
+                self.viewModel.copyDiagnosticLogPath()
+            }
+            Button("Open Logs") {
+                self.viewModel.openDiagnosticLogFolder()
+            }
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
     }
 }
 
@@ -649,17 +775,36 @@ private struct ProcessesTab: View {
                 }
             }
             HStack {
-                TextField("CWD", text: self.$viewModel.commandCWD)
+                TextField("Working directory", text: self.$viewModel.commandCWD)
                     .textFieldStyle(.roundedBorder)
                 TextField("Tag", text: self.$viewModel.commandTag)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 160)
+                Button {
+                    self.viewModel.commandCWD = "/home/user"
+                } label: {
+                    Text("Home")
+                }
+                Button {
+                    self.viewModel.commandCWD = "/workspace"
+                } label: {
+                    Text("Workspace")
+                }
                 Button {
                     Task { await self.viewModel.refreshProcesses() }
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
                 .disabled(self.viewModel.isLoadingProcesses)
+            }
+
+            Text("Run a command through envd and view current sandbox processes. Long-running interactive terminal sessions still belong in your shell; this panel is for quick checks and one-off commands.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let message = self.viewModel.processMessage {
+                InspectorMessageRow(message: message, viewModel: self.viewModel)
             }
 
             HSplitView {
@@ -706,12 +851,6 @@ private struct ProcessesTab: View {
                     Task { await self.viewModel.signalSelected(.kill) }
                 }
                 .disabled(self.viewModel.selectedProcess == nil || !self.viewModel.destructiveActionsEnabled)
-                if let message = self.viewModel.processMessage {
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
             }
         }
         .padding(14)
@@ -724,7 +863,7 @@ private struct ProcessRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
-                Text("\(process.pid)")
+                Text(verbatim: "\(process.pid)")
                     .fontDesign(.monospaced)
                     .foregroundStyle(.secondary)
                 Text(process.config.cmd)
@@ -750,8 +889,16 @@ private struct NetworkTab: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Toggle("Allow internet access", isOn: self.$viewModel.allowInternetAccess)
-            LabeledContent("Public traffic", value: self.viewModel.sandbox?.network?.allowPublicTraffic == true ? "Yes" : "No")
+            Text("Network controls update outbound access for this running sandbox. Applying changes replaces the current egress rules; leaving a list empty clears that list.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 18) {
+                Toggle("Allow internet access", isOn: self.$viewModel.allowInternetAccess)
+                LabeledContent("Public traffic", value: self.viewModel.sandbox?.network?.allowPublicTraffic == true ? "Yes" : "No")
+            }
+
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Allow egress")
@@ -761,6 +908,9 @@ private struct NetworkTab: View {
                         .font(.system(.callout, design: .monospaced))
                         .frame(minHeight: 180)
                         .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                    Text("Examples: api.openai.com, *.github.com, 8.8.8.8/32")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Deny egress")
@@ -770,6 +920,9 @@ private struct NetworkTab: View {
                         .font(.system(.callout, design: .monospaced))
                         .frame(minHeight: 180)
                         .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                    Text("Examples: 0.0.0.0/0, 10.0.0.0/8, 8.8.8.8. E2B does not support domains in deny rules.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             HStack {
@@ -780,11 +933,11 @@ private struct NetworkTab: View {
                 Button("Refresh") {
                     Task { await self.viewModel.refreshDetail() }
                 }
+                Button("Open E2B Network Docs") {
+                    self.viewModel.openNetworkDocs()
+                }
                 if let message = self.viewModel.networkMessage {
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    InspectorMessageRow(message: message, viewModel: self.viewModel)
                 }
             }
             Spacer()

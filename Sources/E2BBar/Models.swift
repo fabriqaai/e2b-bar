@@ -479,20 +479,6 @@ struct TeamUsageSummary: Hashable, Sendable {
         return (samples.map(\.sandboxStartRate).max() ?? 0) * 60
     }
 
-    var estimatedStartsInWindow: Int {
-        let sorted = sortedSamples
-        guard sorted.count > 1 else { return 0 }
-
-        var total = 0.0
-        for index in 1..<sorted.count {
-            let previous = sorted[index - 1]
-            let current = sorted[index]
-            let seconds = max(0, current.timestampUnix - previous.timestampUnix)
-            total += previous.sandboxStartRate * Double(seconds)
-        }
-        return Int(total.rounded())
-    }
-
     var concurrentSeries: [Double] {
         sortedSamples.map { Double($0.concurrentSandboxes) }
     }
@@ -538,7 +524,10 @@ struct FileEntryInfo: Decodable, Identifiable, Hashable, Sendable {
     var id: String { path }
 
     var isDirectory: Bool {
-        if type == "directory" { return true }
+        let normalizedType = type?.lowercased()
+        if normalizedType == "directory" || normalizedType == "file_type_directory" {
+            return true
+        }
         if let permissions, permissions.hasPrefix("d") { return true }
         return false
     }
@@ -561,7 +550,14 @@ struct FileEntryInfo: Decodable, Identifiable, Hashable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
         self.path = try container.decodeIfPresent(String.self, forKey: .path) ?? self.name
-        self.size = try container.decodeIfPresent(Int64.self, forKey: .size) ?? 0
+        if let size = try? container.decodeIfPresent(Int64.self, forKey: .size) {
+            self.size = size
+        } else if let rawSize = try container.decodeIfPresent(String.self, forKey: .size),
+                  let size = Int64(rawSize) {
+            self.size = size
+        } else {
+            self.size = 0
+        }
         self.mode = try container.decodeIfPresent(Int.self, forKey: .mode)
         self.permissions = try container.decodeIfPresent(String.self, forKey: .permissions)
         self.owner = try container.decodeIfPresent(String.self, forKey: .owner)
@@ -579,6 +575,15 @@ struct FileEntryInfo: Decodable, Identifiable, Hashable, Sendable {
 
 struct FileListResponse: Decodable, Sendable {
     var entries: [FileEntryInfo]
+
+    enum CodingKeys: String, CodingKey {
+        case entries
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.entries = try container.decodeIfPresent([FileEntryInfo].self, forKey: .entries) ?? []
+    }
 }
 
 struct FileStatResponse: Decodable, Sendable {

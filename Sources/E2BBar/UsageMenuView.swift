@@ -22,9 +22,9 @@ struct UsageMenuView: View {
 
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2), spacing: 8) {
                 UsageTile(title: "Live concurrent", value: self.liveConcurrent)
-                UsageTile(title: "Est. 24h starts", value: self.startsInWindow)
+                UsageTile(title: "Start rate", value: self.startRate)
                 UsageTile(title: "Peak concurrent", value: self.peakConcurrent)
-                UsageTile(title: "Latest rate", value: self.startRate)
+                UsageTile(title: "Peak start rate", value: self.peakStartRate)
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -63,11 +63,6 @@ struct UsageMenuView: View {
         return "\(usage.latestConcurrent)"
     }
 
-    private var startsInWindow: String {
-        guard let usage else { return "--" }
-        return "\(usage.estimatedStartsInWindow)"
-    }
-
     private var peakConcurrent: String {
         guard let usage else { return "--" }
         return "\(usage.peakConcurrent)"
@@ -76,6 +71,11 @@ struct UsageMenuView: View {
     private var startRate: String {
         guard let usage else { return "--" }
         return "\(Self.number(usage.latestStartsPerMinute))/min"
+    }
+
+    private var peakStartRate: String {
+        guard let usage else { return "--" }
+        return "\(Self.number(usage.peakStartsPerMinute))/min"
     }
 
     private var footerLine: String {

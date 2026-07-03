@@ -85,7 +85,10 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     }
 
     @objc private func refreshNow() {
-        Task { await self.model.refresh() }
+        Task {
+            await self.model.refresh()
+            await self.model.refreshTeamUsageIfConfigured()
+        }
     }
 
     @objc private func openSettings() {
@@ -100,15 +103,6 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     @objc private func openUsageDashboard() {
         self.model.openUsageDashboard()
         self.menu.cancelTracking()
-    }
-
-    @objc private func openUsageSettings() {
-        SettingsOpener.shared.open()
-        self.menu.cancelTracking()
-    }
-
-    @objc private func refreshUsage() {
-        Task { await self.model.refreshTeamUsage() }
     }
 
     @objc private func openDocs() {
@@ -207,23 +201,13 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         self.menu.addItem(.separator())
         self.menu.addItem(self.usageItem())
         self.menu.addItem(self.actionItem("Usage Dashboard", action: #selector(self.openUsageDashboard), image: "chart.bar.xaxis"))
-        self.menu.addItem(self.actionItem("Usage Settings...", action: #selector(self.openUsageSettings), image: "slider.horizontal.3"))
-        let refreshUsageItem = self.actionItem(
-            self.model.isRefreshingTeamUsage ? "Refreshing Usage..." : "Refresh Usage",
-            action: #selector(self.refreshUsage),
-            image: "arrow.clockwise"
-        )
-        refreshUsageItem.isEnabled = !self.model.isRefreshingTeamUsage
-            && !self.model.teamID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        self.menu.addItem(refreshUsageItem)
 
         self.menu.addItem(.separator())
         self.menu.addItem(self.sandboxesItem())
-        self.menu.addItem(self.actionItem("Refresh Now", action: #selector(self.refreshNow), image: "arrow.clockwise"))
+        self.menu.addItem(self.actionItem("Refresh", action: #selector(self.refreshNow), image: "arrow.clockwise"))
 
         self.menu.addItem(.separator())
         self.menu.addItem(self.actionItem("Open E2B Dashboard", action: #selector(self.openDashboard), image: "arrow.up.right.square"))
-        self.menu.addItem(self.actionItem("Open E2B Docs", action: #selector(self.openDocs), image: "book"))
         let updateItem = self.actionItem(
             self.model.isCheckingForUpdates ? "Checking for Updates..." : "Check for Updates...",
             action: #selector(self.checkForUpdates),
@@ -419,13 +403,13 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
                 seconds: port
             )
             submenu.addItem(self.sandboxActionItem(
-                "Open :\(port)",
+                "Open port \(port)",
                 action: #selector(self.openSandboxPort(_:)),
                 image: "arrow.up.right.square",
                 request: portRequest
             ))
             submenu.addItem(self.sandboxActionItem(
-                "Copy :\(port) URL",
+                "Copy \(port) URL",
                 action: #selector(self.copySandboxPortURL(_:)),
                 image: "doc.on.doc",
                 request: portRequest

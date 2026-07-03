@@ -16,7 +16,7 @@ struct EnvdClient {
             path: "filesystem.Filesystem/ListDir",
             body: ListDirectoryRequest(path: path, depth: max(depth, 1))
         )
-        return try JSONDecoder().decode(FileListResponse.self, from: data).entries
+        return try self.decode(FileListResponse.self, from: data, endpoint: "filesystem.Filesystem/ListDir").entries
     }
 
     func stat(path: String) async throws -> FileEntryInfo {
@@ -24,7 +24,7 @@ struct EnvdClient {
             path: "filesystem.Filesystem/Stat",
             body: ["path": path]
         )
-        return try JSONDecoder().decode(FileStatResponse.self, from: data).entry
+        return try self.decode(FileStatResponse.self, from: data, endpoint: "filesystem.Filesystem/Stat").entry
     }
 
     func move(source: String, destination: String) async throws -> FileEntryInfo {
@@ -32,7 +32,7 @@ struct EnvdClient {
             path: "filesystem.Filesystem/Move",
             body: ["source": source, "destination": destination]
         )
-        return try JSONDecoder().decode(FileMoveResponse.self, from: data).entry
+        return try self.decode(FileMoveResponse.self, from: data, endpoint: "filesystem.Filesystem/Move").entry
     }
 
     func remove(path: String) async throws {
@@ -50,7 +50,12 @@ struct EnvdClient {
         var request = self.baseRequest(url: url)
         request.httpMethod = "GET"
         let (data, response) = try await self.session.data(for: request)
-        try HTTP.validate(response: response, data: data)
+        do {
+            try HTTP.validate(response: response, data: data)
+        } catch {
+            self.logFailure(endpoint: "files download", error: error, data: data)
+            throw error
+        }
         return data
     }
 
@@ -75,8 +80,13 @@ struct EnvdClient {
         request.httpBody = body
 
         let (data, response) = try await self.session.data(for: request)
-        try HTTP.validate(response: response, data: data)
-        return try JSONDecoder().decode(FileUploadResponse.self, from: data).files
+        do {
+            try HTTP.validate(response: response, data: data)
+        } catch {
+            self.logFailure(endpoint: "files upload", error: error, data: data)
+            throw error
+        }
+        return try self.decode(FileUploadResponse.self, from: data, endpoint: "files upload").files
     }
 
     func listProcesses() async throws -> [E2BProcessInfo] {
@@ -84,12 +94,12 @@ struct EnvdClient {
             path: "process.Process/List",
             body: EmptyRequest()
         )
-        return try JSONDecoder().decode(E2BProcessListResponse.self, from: data).processes
+        return try self.decode(E2BProcessListResponse.self, from: data, endpoint: "process.Process/List").processes
     }
 
-    func startShellCommand(command: String, cwd: String?, tag: String?) async throws -> String {
+    func startShellCommand(command: String, cwd: String?, tag: String?) async throws -> ProcessRunResult {
         let config = E2BProcessConfig(
-            cmd: "/bin/sh",
+            cmd: "/bin/bash",
             args: ["-lc", command],
             envs: nil,
             cwd: cwd?.isEmpty == false ? cwd : nil
@@ -98,14 +108,14 @@ struct EnvdClient {
             process: config,
             pty: ProcessPTY(size: ProcessPTYSize(cols: 100, rows: 28)),
             tag: tag?.isEmpty == false ? tag : nil,
-            stdin: true
+            stdin: false
         )
-        let data = try await self.sendJSON(
+        let data = try await self.sendConnectStreamingJSON(
             path: "process.Process/Start",
             body: body,
             contentType: "application/connect+json"
         )
-        return String(data: data, encoding: .utf8) ?? ""
+        return try ProcessRunResult(connectStreamData: data)
     }
 
     func sendSignal(pid: Int, signal: ProcessSignal) async throws {
@@ -142,8 +152,57 @@ struct EnvdClient {
         request.httpBody = try JSONEncoder().encode(body)
 
         let (data, response) = try await self.session.data(for: request)
-        try HTTP.validate(response: response, data: data)
+        do {
+            try HTTP.validate(response: response, data: data)
+        } catch {
+            self.logFailure(endpoint: path, error: error, data: data)
+            throw error
+        }
         return data
+    }
+
+    private func sendConnectStreamingJSON<T: Encodable>(
+        path: String,
+        body: T,
+        contentType: String
+    ) async throws -> Data {
+        let url = self.baseURL.appendingPathComponent(path)
+        var request = self.baseRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        request.setValue(contentType, forHTTPHeaderField: "Accept")
+        request.httpBody = try ConnectJSONFraming.encode(JSONEncoder().encode(body))
+
+        let (data, response) = try await self.session.data(for: request)
+        do {
+            try HTTP.validate(response: response, data: data)
+        } catch {
+            self.logFailure(endpoint: path, error: error, data: data)
+            throw error
+        }
+        return data
+    }
+
+    private func decode<T: Decodable>(_ type: T.Type, from data: Data, endpoint: String) throws -> T {
+        do {
+            return try JSONDecoder().decode(type, from: data)
+        } catch {
+            self.logFailure(endpoint: endpoint, error: error, data: data)
+            throw EnvdClientError.decoding(endpoint: endpoint)
+        }
+    }
+
+    private func logFailure(endpoint: String, error: Error, data: Data) {
+        AppDiagnostics.log(
+            "envd request failed",
+            component: "envd",
+            metadata: [
+                "endpoint": endpoint,
+                "sandbox": Self.shortID(sandboxID),
+                "error": error.localizedDescription,
+                "body": String(data: data.prefix(800), encoding: .utf8) ?? "<binary \(data.count) bytes>"
+            ]
+        )
     }
 
     private func baseRequest(url: URL) -> URLRequest {
@@ -163,6 +222,132 @@ struct EnvdClient {
     private static func basicUsername(_ username: String) -> String {
         Data("\(username):".utf8).base64EncodedString()
     }
+
+    private static func shortID(_ id: String) -> String {
+        guard id.count > 10 else { return id }
+        return "\(id.prefix(6))...\(id.suffix(4))"
+    }
+}
+
+enum EnvdClientError: LocalizedError {
+    case decoding(endpoint: String)
+    case connectFrame(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .decoding(let endpoint):
+            "Could not read envd response from \(endpoint). Diagnostic details were written to \(AppDiagnostics.logURL.path)."
+        case .connectFrame(let message):
+            "Could not read envd stream: \(message). Diagnostic details were written to \(AppDiagnostics.logURL.path)."
+        }
+    }
+}
+
+struct ProcessRunResult: Hashable, Sendable {
+    var pid: Int?
+    var output: String
+    var status: String?
+    var exited: Bool?
+
+    init(connectStreamData data: Data) throws {
+        var pid: Int?
+        var output = ""
+        var status: String?
+        var exited: Bool?
+
+        do {
+            let frames = try ConnectJSONFraming.decode(data)
+            for frame in frames {
+                guard !frame.message.isEmpty else { continue }
+                let response = try JSONDecoder().decode(ProcessStartStreamResponse.self, from: frame.message)
+                if let start = response.event?.start {
+                    pid = start.pid
+                }
+                if let pty = response.event?.data?.pty,
+                   let decoded = Data(base64Encoded: pty),
+                   let text = String(data: decoded, encoding: .utf8) {
+                    output += text
+                }
+                if let end = response.event?.end {
+                    status = end.status
+                    exited = end.exited
+                }
+            }
+        } catch {
+            AppDiagnostics.log(
+                "connect stream decode failed",
+                component: "envd",
+                metadata: [
+                    "error": error.localizedDescription,
+                    "bytes": "\(data.count)"
+                ]
+            )
+            throw error
+        }
+
+        self.pid = pid
+        self.output = output
+        self.status = status
+        self.exited = exited
+    }
+}
+
+private enum ConnectJSONFraming {
+    static func encode(_ message: Data) -> Data {
+        var data = Data([0])
+        var length = UInt32(message.count).bigEndian
+        withUnsafeBytes(of: &length) { data.append(contentsOf: $0) }
+        data.append(message)
+        return data
+    }
+
+    static func decode(_ data: Data) throws -> [(flags: UInt8, message: Data)] {
+        var frames: [(UInt8, Data)] = []
+        var index = 0
+
+        while index < data.count {
+            guard index + 5 <= data.count else {
+                throw EnvdClientError.connectFrame("truncated frame header")
+            }
+
+            let flags = data[index]
+            index += 1
+            let length = data[index..<(index + 4)].reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
+            index += 4
+
+            guard index + Int(length) <= data.count else {
+                throw EnvdClientError.connectFrame("truncated frame body")
+            }
+
+            frames.append((flags, Data(data[index..<(index + Int(length))])))
+            index += Int(length)
+        }
+
+        return frames
+    }
+}
+
+private struct ProcessStartStreamResponse: Decodable {
+    var event: ProcessStartEvent?
+}
+
+private struct ProcessStartEvent: Decodable {
+    var start: ProcessStartEventStart?
+    var data: ProcessStartEventData?
+    var end: ProcessStartEventEnd?
+}
+
+private struct ProcessStartEventStart: Decodable {
+    var pid: Int
+}
+
+private struct ProcessStartEventData: Decodable {
+    var pty: String?
+}
+
+private struct ProcessStartEventEnd: Decodable {
+    var exited: Bool?
+    var status: String?
 }
 
 enum ProcessSignal: String, CaseIterable, Hashable {
