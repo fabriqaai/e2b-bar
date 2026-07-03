@@ -168,7 +168,7 @@ GET https://api.github.com/repos/fabriqaai/e2b-bar/releases/latest
 
 If a newer tagged release includes an asset named `E2BBar.dmg`, the app can download it, mount the DMG, replace `/Applications/E2BBar.app`, and relaunch. If `/Applications` is not writable, E2BBar opens the downloaded DMG so you can install it manually.
 
-The updater compares the release tag, such as `v0.4.0`, against the bundled `CFBundleShortVersionString`.
+The updater compares the release tag, such as `v0.4.1`, against the bundled `CFBundleShortVersionString`.
 
 ## Run Locally
 
@@ -240,8 +240,8 @@ Only tagged runs publish a GitHub release. Manual runs still build and upload th
 Create a notarized release:
 
 ```sh
-git tag v0.4.0
-git push origin v0.4.0
+git tag v0.4.1
+git push origin v0.4.1
 ```
 
 The release job does this on `macos-15`:

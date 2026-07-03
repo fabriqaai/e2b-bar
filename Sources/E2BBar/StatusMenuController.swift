@@ -180,18 +180,8 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         self.menu.addItem(self.headerItem())
         self.menu.addItem(.separator())
 
-        self.menu.addItem(self.disabledItem("Running: \(self.model.snapshot.runningCount)"))
-        self.menu.addItem(self.disabledItem("Paused: \(self.model.snapshot.pausedCount)"))
-        self.menu.addItem(self.disabledItem("API: \(self.model.snapshot.totals.debugSummary)"))
-        if self.model.lifecycleEventsEnabled {
-            let eventTitle = self.model.lastLifecycleEvent.map { "Events: \($0.displaySummary)" } ?? "Events: watching lifecycle"
-            self.menu.addItem(self.wrappingDisabledItem(eventTitle))
-        }
-        if let refreshedAt = self.model.snapshot.refreshedAt {
-            self.menu.addItem(self.disabledItem("Updated: \(refreshedAt.formatted(date: .omitted, time: .standard))"))
-        }
-        if let message = self.model.lastActionMessage {
-            self.menu.addItem(self.wrappingDisabledItem("Last action: \(message)"))
+        if let statusLine = self.compactStatusLine() {
+            self.menu.addItem(self.disabledItem(statusLine))
         }
         if let error = self.model.snapshot.error {
             self.menu.addItem(self.wrappingDisabledItem("Error: \(error)"))
@@ -230,6 +220,34 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         item.view = view
         item.isEnabled = false
         return item
+    }
+
+    private func compactStatusLine() -> String? {
+        var parts: [String] = []
+
+        if let refreshedAt = self.model.snapshot.refreshedAt {
+            parts.append("Updated \(refreshedAt.formatted(date: .omitted, time: .shortened))")
+        }
+
+        if self.model.lifecycleEventsEnabled, let event = self.model.lastLifecycleEvent {
+            parts.append("Event \(event.compactSummary)")
+        }
+
+        if let message = self.model.lastActionMessage, !message.hasPrefix("Lifecycle ") {
+            parts.append(Self.compactActionMessage(message))
+        }
+
+        guard !parts.isEmpty else { return nil }
+        return parts.joined(separator: "  ·  ")
+    }
+
+    private static func compactActionMessage(_ message: String) -> String {
+        let trimmed = message
+            .replacingOccurrences(of: "E2BBar is ", with: "")
+            .replacingOccurrences(of: "Last action: ", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > 42 else { return trimmed }
+        return "\(trimmed.prefix(39))..."
     }
 
     private func sandboxesItem() -> NSMenuItem {

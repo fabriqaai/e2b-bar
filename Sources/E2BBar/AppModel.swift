@@ -166,7 +166,7 @@ final class AppModel: ObservableObject {
             }
 
             rememberLifecycleEvent(newest)
-            setActionMessage("Lifecycle event: \(newest.displaySummary)")
+            setActionMessage("Lifecycle \(newest.compactSummary)")
             await refresh()
         } catch {
             lifecycleEventsError = Self.errorMessage(error)

@@ -573,6 +573,17 @@ struct E2BSandboxEvent: Decodable, Identifiable, Hashable, Sendable {
         }.joined(separator: " ")
     }
 
+    var compactSummary: String {
+        let action = type.replacingOccurrences(of: "sandbox.lifecycle.", with: "")
+        guard let sandboxID, !sandboxID.isEmpty else { return action }
+        return "\(action) \(Self.shortID(sandboxID))"
+    }
+
+    private static func shortID(_ value: String) -> String {
+        guard value.count > 12 else { return value }
+        return "\(value.prefix(6))...\(value.suffix(4))"
+    }
+
     enum CodingKeys: String, CodingKey {
         case version
         case id
