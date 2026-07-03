@@ -1,7 +1,6 @@
 name = "e2bbar-app"
 main = "worker/index.js"
 compatibility_date = "2026-07-03"
-preview_urls = true
 
 [[routes]]
 pattern = "e2b.bar"
