@@ -192,7 +192,7 @@ private struct AboutSettingsView: View {
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
                 GridRow {
                     Text("Version")
-                    Text("0.1.2")
+                    Text("0.2.0")
                 }
                 GridRow {
                     Text("Website")

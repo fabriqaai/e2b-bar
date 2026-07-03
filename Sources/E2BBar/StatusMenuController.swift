@@ -8,6 +8,18 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         static let sandboxMenuWidth: CGFloat = 520
     }
 
+    private final class SandboxActionRequest: NSObject {
+        let sandboxID: String
+        let sandboxName: String
+        let seconds: Int
+
+        init(sandboxID: String, sandboxName: String, seconds: Int = 0) {
+            self.sandboxID = sandboxID
+            self.sandboxName = sandboxName
+            self.seconds = seconds
+        }
+    }
+
     private let model: AppModel
     private let statusBar: NSStatusBar
     private var statusItem: NSStatusItem?
@@ -88,8 +100,45 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     }
 
     @objc private func copySandboxID(_ sender: NSMenuItem) {
-        guard let sandboxID = sender.representedObject as? String else { return }
-        self.model.copySandboxID(sandboxID)
+        guard let request = sender.representedObject as? SandboxActionRequest else { return }
+        self.model.copySandboxID(request.sandboxID)
+        self.menu.cancelTracking()
+    }
+
+    @objc private func copySandboxLogs(_ sender: NSMenuItem) {
+        guard let request = sender.representedObject as? SandboxActionRequest else { return }
+        Task { await self.model.copySandboxLogs(request.sandboxID) }
+        self.menu.cancelTracking()
+    }
+
+    @objc private func copySandboxMetrics(_ sender: NSMenuItem) {
+        guard let request = sender.representedObject as? SandboxActionRequest else { return }
+        Task { await self.model.copySandboxMetrics(request.sandboxID) }
+        self.menu.cancelTracking()
+    }
+
+    @objc private func refreshSandboxTTL(_ sender: NSMenuItem) {
+        guard let request = sender.representedObject as? SandboxActionRequest else { return }
+        Task { await self.model.refreshSandboxTTL(request.sandboxID, duration: request.seconds) }
+        self.menu.cancelTracking()
+    }
+
+    @objc private func setSandboxTimeout(_ sender: NSMenuItem) {
+        guard let request = sender.representedObject as? SandboxActionRequest else { return }
+        Task { await self.model.setSandboxTimeout(request.sandboxID, timeout: request.seconds) }
+        self.menu.cancelTracking()
+    }
+
+    @objc private func pauseSandbox(_ sender: NSMenuItem) {
+        guard let request = sender.representedObject as? SandboxActionRequest else { return }
+        Task { await self.model.pauseSandbox(request.sandboxID) }
+        self.menu.cancelTracking()
+    }
+
+    @objc private func deleteSandbox(_ sender: NSMenuItem) {
+        guard let request = sender.representedObject as? SandboxActionRequest else { return }
+        guard self.confirmDeleteSandbox(request) else { return }
+        Task { await self.model.deleteSandbox(request.sandboxID) }
         self.menu.cancelTracking()
     }
 
@@ -107,6 +156,9 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         self.menu.addItem(self.disabledItem("API: \(self.model.snapshot.totals.debugSummary)"))
         if let refreshedAt = self.model.snapshot.refreshedAt {
             self.menu.addItem(self.disabledItem("Updated: \(refreshedAt.formatted(date: .omitted, time: .standard))"))
+        }
+        if let message = self.model.lastActionMessage {
+            self.menu.addItem(self.wrappingDisabledItem("Last action: \(message)"))
         }
         if let error = self.model.snapshot.error {
             self.menu.addItem(self.wrappingDisabledItem("Error: \(error)"))
@@ -164,20 +216,114 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     }
 
     private func sandboxItem(for sandbox: E2BSandbox) -> NSMenuItem {
-        let item = NSMenuItem(title: "", action: #selector(self.copySandboxID(_:)), keyEquivalent: "")
-        item.target = self
-        item.representedObject = sandbox.sandboxID
-        item.toolTip = "Copy sandbox ID: \(sandbox.sandboxID)"
-        let highlightState = MenuItemHighlightState()
-        item.view = MenuItemHostingView(
+        let request = SandboxActionRequest(sandboxID: sandbox.sandboxID, sandboxName: sandbox.displayName)
+        let item = NSMenuItem(title: sandbox.displayName, action: nil, keyEquivalent: "")
+        item.image = NSImage(systemSymbolName: self.iconName(for: sandbox.state), accessibilityDescription: nil)
+        item.toolTip = "\(sandbox.state.label): \(sandbox.sandboxID)"
+        item.submenu = self.sandboxActionsMenu(for: sandbox, request: request)
+        return item
+    }
+
+    private func sandboxActionsMenu(for sandbox: E2BSandbox, request: SandboxActionRequest) -> NSMenu {
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        submenu.delegate = self
+
+        let header = NSMenuItem()
+        header.view = MenuItemHostingView(
             rootView: AnyView(
                 SandboxRowView(sandbox: sandbox) { [weak self] in
                     self?.model.copySandboxID(sandbox.sandboxID)
                     self?.menu.cancelTracking()
                 }
-            ),
-            highlightState: highlightState
+            )
         )
+        header.isEnabled = false
+        submenu.addItem(header)
+        submenu.addItem(.separator())
+
+        submenu.addItem(self.sandboxActionItem(
+            "Copy Sandbox ID",
+            action: #selector(self.copySandboxID(_:)),
+            image: "doc.on.doc",
+            request: request
+        ))
+        submenu.addItem(self.sandboxActionItem(
+            "Copy Recent Logs",
+            action: #selector(self.copySandboxLogs(_:)),
+            image: "doc.text.magnifyingglass",
+            request: request
+        ))
+        submenu.addItem(self.sandboxActionItem(
+            "Copy Metrics Summary",
+            action: #selector(self.copySandboxMetrics(_:)),
+            image: "chart.xyaxis.line",
+            request: request
+        ))
+
+        submenu.addItem(.separator())
+        submenu.addItem(self.extendTTLItem(for: request))
+        submenu.addItem(self.setTimeoutItem(for: request))
+        if sandbox.state == .running {
+            submenu.addItem(self.sandboxActionItem(
+                "Pause Sandbox",
+                action: #selector(self.pauseSandbox(_:)),
+                image: "pause.circle",
+                request: request
+            ))
+        }
+
+        submenu.addItem(.separator())
+        submenu.addItem(self.sandboxActionItem(
+            "Delete Sandbox...",
+            action: #selector(self.deleteSandbox(_:)),
+            image: "trash",
+            request: request
+        ))
+
+        self.refreshViewHeights(in: submenu, width: Metrics.sandboxMenuWidth)
+        return submenu
+    }
+
+    private func extendTTLItem(for request: SandboxActionRequest) -> NSMenuItem {
+        let item = NSMenuItem(title: "Extend TTL", action: nil, keyEquivalent: "")
+        item.image = NSImage(systemSymbolName: "timer", accessibilityDescription: nil)
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        for option in [(900, "15 minutes"), (1800, "30 minutes"), (3600, "1 hour")] {
+            submenu.addItem(self.sandboxActionItem(
+                "+\(option.1)",
+                action: #selector(self.refreshSandboxTTL(_:)),
+                image: "plus.circle",
+                request: SandboxActionRequest(
+                    sandboxID: request.sandboxID,
+                    sandboxName: request.sandboxName,
+                    seconds: option.0
+                )
+            ))
+        }
+        item.submenu = submenu
+        return item
+    }
+
+    private func setTimeoutItem(for request: SandboxActionRequest) -> NSMenuItem {
+        let item = NSMenuItem(title: "Set Timeout", action: nil, keyEquivalent: "")
+        item.image = NSImage(systemSymbolName: "clock.arrow.circlepath", accessibilityDescription: nil)
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        for option in [(3600, "1 hour"), (21600, "6 hours"), (86400, "24 hours")] {
+            submenu.addItem(self.sandboxActionItem(
+                option.1,
+                action: #selector(self.setSandboxTimeout(_:)),
+                image: "clock",
+                request: SandboxActionRequest(
+                    sandboxID: request.sandboxID,
+                    sandboxName: request.sandboxName,
+                    seconds: option.0
+                )
+            ))
+        }
+        item.submenu = submenu
         return item
     }
 
@@ -198,6 +344,17 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
         item.target = self
         item.image = NSImage(systemSymbolName: image, accessibilityDescription: nil)
+        return item
+    }
+
+    private func sandboxActionItem(
+        _ title: String,
+        action: Selector,
+        image: String,
+        request: SandboxActionRequest
+    ) -> NSMenuItem {
+        let item = self.actionItem(title, action: action, image: image)
+        item.representedObject = request
         return item
     }
 
@@ -223,6 +380,27 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             Task { @MainActor in
                 await self?.model.refresh()
             }
+        }
+    }
+
+    private func confirmDeleteSandbox(_ request: SandboxActionRequest) -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .critical
+        alert.messageText = "Delete \(request.sandboxName)?"
+        alert.informativeText = "This kills sandbox \(request.sandboxID). This cannot be undone."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    private func iconName(for state: E2BSandboxState) -> String {
+        switch state {
+        case .running:
+            "play.circle"
+        case .paused:
+            "pause.circle"
+        case .unknown:
+            "questionmark.circle"
         }
     }
 

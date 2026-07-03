@@ -178,6 +178,166 @@ struct VolumeMount: Codable, Hashable, Sendable {
     var path: String
 }
 
+struct E2BMetric: Decodable, Hashable, Sendable {
+    var timestamp: Date?
+    var timestampUnix: Int64
+    var cpuCount: Int
+    var cpuUsedPct: Double
+    var memUsed: Int64
+    var memTotal: Int64
+    var memCache: Int64
+    var diskUsed: Int64
+    var diskTotal: Int64
+
+    enum CodingKeys: String, CodingKey {
+        case timestamp
+        case timestampUnix
+        case cpuCount
+        case cpuUsedPct
+        case memUsed
+        case memTotal
+        case memCache
+        case diskUsed
+        case diskTotal
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let rawTimestamp = try container.decodeIfPresent(String.self, forKey: .timestamp) {
+            self.timestamp = DateParsing.parse(rawTimestamp)
+        } else {
+            self.timestamp = nil
+        }
+        self.timestampUnix = try container.decodeIfPresent(Int64.self, forKey: .timestampUnix) ?? 0
+        self.cpuCount = try container.decodeIfPresent(Int.self, forKey: .cpuCount) ?? 0
+        self.cpuUsedPct = try container.decodeIfPresent(Double.self, forKey: .cpuUsedPct) ?? 0
+        self.memUsed = try container.decodeIfPresent(Int64.self, forKey: .memUsed) ?? 0
+        self.memTotal = try container.decodeIfPresent(Int64.self, forKey: .memTotal) ?? 0
+        self.memCache = try container.decodeIfPresent(Int64.self, forKey: .memCache) ?? 0
+        self.diskUsed = try container.decodeIfPresent(Int64.self, forKey: .diskUsed) ?? 0
+        self.diskTotal = try container.decodeIfPresent(Int64.self, forKey: .diskTotal) ?? 0
+    }
+
+    static func summary(sandboxID: String, metrics: [E2BMetric]) -> String {
+        guard !metrics.isEmpty else {
+            return "E2BBar metrics for \(sandboxID)\n\nNo metrics returned for the selected interval."
+        }
+
+        let sorted = metrics.sorted { $0.timestampUnix < $1.timestampUnix }
+        let latest = sorted.last!
+        let avgCPU = sorted.map(\.cpuUsedPct).average
+        let maxCPU = sorted.map(\.cpuUsedPct).max() ?? 0
+        let memPercent = latest.memTotal > 0 ? Double(latest.memUsed) / Double(latest.memTotal) * 100 : 0
+        let diskPercent = latest.diskTotal > 0 ? Double(latest.diskUsed) / Double(latest.diskTotal) * 100 : 0
+        let range = Self.rangeDescription(sorted)
+
+        return """
+        E2BBar metrics for \(sandboxID)
+
+        Samples: \(sorted.count)
+        Window: \(range)
+        CPU: avg \(Self.percent(avgCPU)), max \(Self.percent(maxCPU)), cores \(latest.cpuCount)
+        Memory: \(Self.bytes(latest.memUsed)) / \(Self.bytes(latest.memTotal)) (\(Self.percent(memPercent)))
+        Disk: \(Self.bytes(latest.diskUsed)) / \(Self.bytes(latest.diskTotal)) (\(Self.percent(diskPercent)))
+        """
+    }
+
+    private static func rangeDescription(_ metrics: [E2BMetric]) -> String {
+        guard let first = metrics.first, let last = metrics.last else { return "unknown" }
+        let firstDate = first.timestamp ?? Date(timeIntervalSince1970: TimeInterval(first.timestampUnix))
+        let lastDate = last.timestamp ?? Date(timeIntervalSince1970: TimeInterval(last.timestampUnix))
+        return "\(firstDate.formatted(date: .omitted, time: .standard)) - \(lastDate.formatted(date: .omitted, time: .standard))"
+    }
+
+    private static func percent(_ value: Double) -> String {
+        String(format: "%.1f%%", value)
+    }
+
+    private static func bytes(_ value: Int64) -> String {
+        let units = ["B", "KB", "MB", "GB", "TB"]
+        var amount = Double(value)
+        var unitIndex = 0
+        while amount >= 1024, unitIndex < units.count - 1 {
+            amount /= 1024
+            unitIndex += 1
+        }
+        if unitIndex == 0 {
+            return "\(Int(amount))\(units[unitIndex])"
+        }
+        return String(format: "%.1f%@", amount, units[unitIndex])
+    }
+}
+
+struct E2BLogResponse: Decodable, Sendable {
+    var logs: [E2BLogEntry]
+}
+
+struct E2BLogEntry: Decodable, Hashable, Sendable {
+    var fields: [String: JSONValue]
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.fields = try container.decode([String: JSONValue].self)
+    }
+
+    var timestampDescription: String? {
+        self.stringValue(keys: ["timestamp", "time", "createdAt", "ts"])
+    }
+
+    var levelDescription: String? {
+        self.stringValue(keys: ["level", "severity", "type"])
+    }
+
+    var messageDescription: String {
+        if let message = self.stringValue(keys: ["message", "msg", "line", "text"]) {
+            return message
+        }
+        return self.fields
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key)=\($0.value.shortDescription)" }
+            .joined(separator: " ")
+    }
+
+    static func transcript(sandboxID: String, logs: [E2BLogEntry]) -> String {
+        guard !logs.isEmpty else {
+            return "E2BBar logs for \(sandboxID)\n\nNo logs returned."
+        }
+
+        let lines = logs.map { entry in
+            [
+                entry.timestampDescription,
+                entry.levelDescription,
+                entry.messageDescription
+            ]
+            .compactMap { value in
+                guard let value, !value.isEmpty else { return nil }
+                return value
+            }
+            .joined(separator: " ")
+        }
+
+        return "E2BBar logs for \(sandboxID)\n\n" + lines.joined(separator: "\n")
+    }
+
+    private func stringValue(keys: [String]) -> String? {
+        for key in keys {
+            guard let value = self.fields[key] else { continue }
+            switch value {
+            case .string(let string):
+                return string
+            default:
+                return value.shortDescription
+            }
+        }
+        return nil
+    }
+}
+
+enum E2BLogDirection: String, Sendable {
+    case forward
+    case backward
+}
+
 enum JSONValue: Codable, Hashable, Sendable {
     case string(String)
     case number(Double)
@@ -242,6 +402,13 @@ enum JSONValue: Codable, Hashable, Sendable {
         case .null:
             "null"
         }
+    }
+}
+
+private extension Array where Element == Double {
+    var average: Double {
+        guard !self.isEmpty else { return 0 }
+        return self.reduce(0, +) / Double(self.count)
     }
 }
 

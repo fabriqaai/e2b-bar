@@ -16,6 +16,7 @@ Source: https://github.com/fabriqaai/e2b-bar
 - Shows sandbox display name, state, resource summary, short ID, expiration time, and metadata summary.
 - Copies a sandbox ID when you click a sandbox row.
 - Shows running, paused, fetched, and API-reported totals.
+- Provides per-sandbox actions for copying logs, copying metrics, extending TTL, setting timeout, pausing, and deleting.
 - Supports state filters for running, paused, or both.
 - Supports an E2B metadata filter.
 - Refreshes on a configurable interval.
@@ -37,6 +38,7 @@ The menu includes:
 - Last refreshed time.
 - Error text when the latest request fails.
 - Sandboxes submenu.
+- Per-sandbox action menus.
 - Refresh action.
 - E2B dashboard and docs links.
 - Settings.
@@ -174,8 +176,8 @@ Only tagged runs publish a GitHub release. Manual runs still build and upload th
 Create a notarized release:
 
 ```sh
-git tag v0.1.2
-git push origin v0.1.2
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 The release job does this on `macos-15`:
@@ -317,11 +319,12 @@ Check authoritative Cloudflare DNS first. Local resolvers can lag even after Clo
 
 ## Current Scope
 
-E2BBar is intentionally small. It is meant to be a fast menu bar companion for visibility and links, not a full dashboard replacement. The current app lists and filters sandboxes, copies IDs, opens external surfaces, and keeps credentials local.
+E2BBar is intentionally small. It is meant to be a fast menu bar companion for visibility and light operations, not a full dashboard replacement. The current app lists and filters sandboxes, copies IDs/logs/metrics, extends TTLs, sets timeouts, pauses and deletes sandboxes, opens external surfaces, and keeps credentials local.
 
 Useful future additions:
 
-- Sandbox kill/pause/resume actions when the API surface is wired safely.
+- Create sandbox from template.
+- Snapshot creation and snapshot list.
 - Per-sandbox dashboard or terminal links if E2B exposes stable URLs.
 - Search inside the menu.
 - Template or team grouping.

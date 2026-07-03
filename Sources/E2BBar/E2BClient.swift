@@ -33,6 +33,71 @@ struct E2BClient {
         return E2BListPage(sandboxes: allSandboxes, totals: mergedTotals, nextToken: nextToken)
     }
 
+    func getSandboxMetrics(
+        sandboxID: String,
+        start: Int64,
+        end: Int64
+    ) async throws -> [E2BMetric] {
+        let queryItems = [
+            URLQueryItem(name: "start", value: "\(start)"),
+            URLQueryItem(name: "end", value: "\(end)")
+        ]
+        let data = try await self.request(
+            path: "sandboxes/\(sandboxID)/metrics",
+            method: "GET",
+            queryItems: queryItems
+        )
+        return try JSONDecoder().decode([E2BMetric].self, from: data)
+    }
+
+    func getSandboxLogs(
+        sandboxID: String,
+        limit: Int = 100,
+        direction: E2BLogDirection = .backward
+    ) async throws -> [E2BLogEntry] {
+        let queryItems = [
+            URLQueryItem(name: "limit", value: "\(min(max(limit, 0), 1000))"),
+            URLQueryItem(name: "direction", value: direction.rawValue)
+        ]
+        let data = try await self.request(
+            path: "v2/sandboxes/\(sandboxID)/logs",
+            method: "GET",
+            queryItems: queryItems
+        )
+        return try JSONDecoder().decode(E2BLogResponse.self, from: data).logs
+    }
+
+    func refreshSandbox(sandboxID: String, duration: Int) async throws {
+        try await self.sendJSON(
+            path: "sandboxes/\(sandboxID)/refreshes",
+            method: "POST",
+            body: ["duration": min(max(duration, 0), 3600)]
+        )
+    }
+
+    func setSandboxTimeout(sandboxID: String, timeout: Int) async throws {
+        try await self.sendJSON(
+            path: "sandboxes/\(sandboxID)/timeout",
+            method: "POST",
+            body: ["timeout": max(timeout, 0)]
+        )
+    }
+
+    func pauseSandbox(sandboxID: String, memory: Bool = true) async throws {
+        try await self.sendJSON(
+            path: "sandboxes/\(sandboxID)/pause",
+            method: "POST",
+            body: ["memory": memory]
+        )
+    }
+
+    func deleteSandbox(sandboxID: String) async throws {
+        _ = try await self.request(
+            path: "sandboxes/\(sandboxID)",
+            method: "DELETE"
+        )
+    }
+
     private func fetchPage(
         states: [E2BSandboxState],
         metadata: String?,
@@ -77,6 +142,50 @@ struct E2BClient {
             totals: totals,
             nextToken: http?.value(forHTTPHeaderField: "X-Next-Token")
         )
+    }
+
+    @discardableResult
+    private func sendJSON<T: Encodable>(
+        path: String,
+        method: String,
+        body: T
+    ) async throws -> Data {
+        let data = try JSONEncoder().encode(body)
+        return try await self.request(
+            path: path,
+            method: method,
+            body: data,
+            contentType: "application/json"
+        )
+    }
+
+    private func request(
+        path: String,
+        method: String,
+        queryItems: [URLQueryItem] = [],
+        body: Data? = nil,
+        contentType: String? = nil
+    ) async throws -> Data {
+        var components = URLComponents(url: self.baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
+        if !queryItems.isEmpty {
+            components.queryItems = queryItems
+        }
+        guard let url = components.url else {
+            throw E2BClientError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue(self.apiKey, forHTTPHeaderField: "X-API-Key")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let contentType {
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        }
+        request.httpBody = body
+
+        let (data, response) = try await self.session.data(for: request)
+        try HTTP.validate(response: response, data: data)
+        return data
     }
 }
 

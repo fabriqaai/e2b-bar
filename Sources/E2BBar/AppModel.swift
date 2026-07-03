@@ -6,6 +6,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var snapshot = DashboardSnapshot.empty
     @Published var isRefreshing = false
     @Published private(set) var credentialState = CredentialState.missing
+    @Published private(set) var lastActionMessage: String?
     @Published var stateFilter: SandboxStateFilter {
         didSet {
             defaults.set(stateFilter.rawValue, forKey: DefaultsKey.stateFilter)
@@ -131,8 +132,76 @@ final class AppModel: ObservableObject {
     }
 
     func copySandboxID(_ sandboxID: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(sandboxID, forType: .string)
+        copyToPasteboard(sandboxID)
+        setActionMessage("Copied sandbox ID \(shortID(sandboxID))")
+    }
+
+    func copySandboxLogs(_ sandboxID: String) async {
+        do {
+            let client = try currentClient()
+            let logs = try await client.getSandboxLogs(sandboxID: sandboxID, limit: 200)
+            copyToPasteboard(E2BLogEntry.transcript(sandboxID: sandboxID, logs: logs))
+            setActionMessage("Copied \(logs.count) log entries for \(shortID(sandboxID))")
+        } catch {
+            apply(snapshot.with(error: Self.errorMessage(error)))
+        }
+    }
+
+    func copySandboxMetrics(_ sandboxID: String) async {
+        do {
+            let client = try currentClient()
+            let end = Int64(Date().timeIntervalSince1970)
+            let start = end - 15 * 60
+            let metrics = try await client.getSandboxMetrics(sandboxID: sandboxID, start: start, end: end)
+            copyToPasteboard(E2BMetric.summary(sandboxID: sandboxID, metrics: metrics))
+            setActionMessage("Copied metrics for \(shortID(sandboxID))")
+        } catch {
+            apply(snapshot.with(error: Self.errorMessage(error)))
+        }
+    }
+
+    func refreshSandboxTTL(_ sandboxID: String, duration: Int) async {
+        do {
+            let client = try currentClient()
+            try await client.refreshSandbox(sandboxID: sandboxID, duration: duration)
+            setActionMessage("Extended \(shortID(sandboxID)) by \(Self.durationLabel(duration))")
+            await refresh()
+        } catch {
+            apply(snapshot.with(error: Self.errorMessage(error)))
+        }
+    }
+
+    func setSandboxTimeout(_ sandboxID: String, timeout: Int) async {
+        do {
+            let client = try currentClient()
+            try await client.setSandboxTimeout(sandboxID: sandboxID, timeout: timeout)
+            setActionMessage("Set \(shortID(sandboxID)) timeout to \(Self.durationLabel(timeout))")
+            await refresh()
+        } catch {
+            apply(snapshot.with(error: Self.errorMessage(error)))
+        }
+    }
+
+    func pauseSandbox(_ sandboxID: String) async {
+        do {
+            let client = try currentClient()
+            try await client.pauseSandbox(sandboxID: sandboxID, memory: true)
+            setActionMessage("Paused \(shortID(sandboxID))")
+            await refresh()
+        } catch {
+            apply(snapshot.with(error: Self.errorMessage(error)))
+        }
+    }
+
+    func deleteSandbox(_ sandboxID: String) async {
+        do {
+            let client = try currentClient()
+            try await client.deleteSandbox(sandboxID: sandboxID)
+            setActionMessage("Deleted \(shortID(sandboxID))")
+            await refresh()
+        } catch {
+            apply(snapshot.with(error: Self.errorMessage(error)))
+        }
     }
 
     private func currentAPIKey() throws -> String {
@@ -153,6 +222,10 @@ final class AppModel: ObservableObject {
             return environmentKey
         }
         throw AppError.missingAPIKey
+    }
+
+    private func currentClient() throws -> E2BClient {
+        E2BClient(apiKey: try currentAPIKey())
     }
 
     private func reloadCredentialState() {
@@ -188,6 +261,11 @@ final class AppModel: ObservableObject {
         onSnapshotChange?()
     }
 
+    private func setActionMessage(_ message: String) {
+        lastActionMessage = message
+        onSnapshotChange?()
+    }
+
     private func updateLaunchAtLogin(enabled: Bool) {
         do {
             try LaunchAtLoginManager.setEnabled(enabled)
@@ -200,6 +278,26 @@ final class AppModel: ObservableObject {
     private func open(_ urlString: String) {
         guard let url = URL(string: urlString) else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    private func copyToPasteboard(_ value: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
+    }
+
+    private func shortID(_ value: String) -> String {
+        guard value.count > 12 else { return value }
+        return "\(value.prefix(6))...\(value.suffix(4))"
+    }
+
+    private static func durationLabel(_ seconds: Int) -> String {
+        if seconds % 3600 == 0 {
+            return "\(seconds / 3600)h"
+        }
+        if seconds % 60 == 0 {
+            return "\(seconds / 60)m"
+        }
+        return "\(seconds)s"
     }
 
     private static func errorMessage(_ error: Error) -> String {
