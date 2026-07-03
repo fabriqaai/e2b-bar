@@ -118,6 +118,18 @@ final class AppModel: ObservableObject {
         open("https://e2b.dev/docs/sandbox/list")
     }
 
+    func openWebsite() {
+        open("https://e2b.bar")
+    }
+
+    func openGitHub() {
+        open("https://github.com/fabriqaai/e2b-bar")
+    }
+
+    func openReleases() {
+        open("https://github.com/fabriqaai/e2b-bar/releases")
+    }
+
     func copySandboxID(_ sandboxID: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(sandboxID, forType: .string)

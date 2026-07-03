@@ -1,4 +1,4 @@
-.PHONY: build app run run-app clean
+.PHONY: build app dmg run run-app clean
 
 APP_NAME := E2BBar
 
@@ -7,6 +7,9 @@ build:
 
 app: build
 	./Scripts/package_app.sh release
+
+dmg: app
+	./Scripts/create_dmg.sh
 
 run:
 	swift run $(APP_NAME)

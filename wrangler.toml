@@ -1,0 +1,20 @@
+name = "e2bbar-app"
+main = "worker/index.js"
+compatibility_date = "2026-07-03"
+preview_urls = true
+
+[[routes]]
+pattern = "e2b.bar"
+custom_domain = true
+
+[[routes]]
+pattern = "www.e2b.bar"
+custom_domain = true
+
+[[routes]]
+pattern = "e2bbar.app"
+custom_domain = true
+
+[[routes]]
+pattern = "www.e2bbar.app"
+custom_domain = true

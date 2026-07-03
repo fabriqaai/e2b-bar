@@ -15,7 +15,7 @@ struct SettingsView: View {
             AccountSettingsView(model: self.model)
                 .tabItem { Label("Account", systemImage: "key") }
                 .tag(SettingsTab.account)
-            AboutSettingsView()
+            AboutSettingsView(model: self.model)
                 .tabItem { Label("About", systemImage: "info.circle") }
                 .tag(SettingsTab.about)
         }
@@ -65,8 +65,9 @@ enum SettingsTab: CaseIterable, Hashable {
     case account
     case about
 
-    static let defaultWidth: CGFloat = 520
-    static let windowHeight: CGFloat = 360
+    static let defaultWidth: CGFloat = 560
+    static let aboutWidth: CGFloat = 640
+    static let windowHeight: CGFloat = 390
 
     var title: String {
         switch self {
@@ -77,7 +78,7 @@ enum SettingsTab: CaseIterable, Hashable {
     }
 
     var preferredWidth: CGFloat {
-        Self.defaultWidth
+        self == .about ? Self.aboutWidth : Self.defaultWidth
     }
 
     var preferredHeight: CGFloat {
@@ -168,30 +169,68 @@ private struct AccountSettingsView: View {
 }
 
 private struct AboutSettingsView: View {
+    @ObservedObject var model: AppModel
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 12) {
                 Image(systemName: "shippingbox")
-                    .font(.system(size: 32, weight: .semibold))
+                    .font(.system(size: 34, weight: .semibold))
+                    .foregroundStyle(.green)
+                    .frame(width: 44, height: 44)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("E2BBar")
                         .font(.title2.weight(.semibold))
-                    Text("macOS menu bar monitor for E2B sandboxes")
+                    Text("Your E2B sandboxes, one glance away.")
                         .foregroundStyle(.secondary)
                 }
             }
             Divider()
+
+            Text("E2BBar is a tiny macOS menu bar app for people who keep remote E2B environments running while they build, test, or hand work between agents. It shows running and paused sandboxes, resource totals, expiration timing, metadata, and quick links without opening the dashboard.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
                 GridRow {
                     Text("Version")
                     Text("0.1.0")
                 }
                 GridRow {
+                    Text("Website")
+                    Text("e2b.bar")
+                }
+                GridRow {
+                    Text("Source")
+                    Text("github.com/fabriqaai/e2b-bar")
+                }
+                GridRow {
                     Text("API")
                     Text("GET /v2/sandboxes")
                 }
+                GridRow {
+                    Text("Storage")
+                    Text("API key is stored in macOS Keychain")
+                }
             }
             .font(.callout)
+
+            HStack {
+                Button("Website") {
+                    self.model.openWebsite()
+                }
+                Button("GitHub") {
+                    self.model.openGitHub()
+                }
+                Button("Releases") {
+                    self.model.openReleases()
+                }
+                Button("E2B Docs") {
+                    self.model.openDocs()
+                }
+            }
+
             Spacer()
         }
         .padding(24)
