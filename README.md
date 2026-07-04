@@ -12,7 +12,8 @@ Source: https://github.com/fabriqaai/e2b-bar
 
 - Shows a compact menu bar counter for running sandboxes.
 - Marks the menu bar item with an error indicator when refresh fails.
-- Lists running and paused E2B sandboxes in a submenu.
+- Can show the top 3, 5, or 10 sandboxes directly in the first-level menu.
+- Lists all running and paused E2B sandboxes in a submenu.
 - Shows sandbox display name, state, inline CPU/memory/disk badges, short ID, expiration time, and metadata summary.
 - Copies a sandbox ID when you click a sandbox row.
 - Shows running, paused, fetched, and API-reported totals.
@@ -23,8 +24,8 @@ Source: https://github.com/fabriqaai/e2b-bar
 - Opens or copies common public port URLs for `3000`, `8000`, and `8080`.
 - Uses batch sandbox metrics when possible instead of one metrics request per sandbox.
 - Can use lifecycle events between full refreshes to avoid polling the whole sandbox list every interval.
-- Shows a team usage mini-dashboard in the menu when you provide a team ID.
-- Shows Live concurrent, start rate, Peak concurrent, and peak start rate with labeled menu bar trends.
+- Shows compact or detailed team usage in the menu when you provide a team ID.
+- Shows Live concurrent, start rate, Peak concurrent, and peak start rate; detailed mode can include trends.
 - Opens the correct E2B usage dashboard when you configure your dashboard slug or full usage URL.
 - Checks GitHub Releases for updates and can download/install the latest DMG.
 - Can notify you before sandboxes expire.
@@ -45,11 +46,11 @@ The menu includes:
 
 - Header with health and credential state.
 - Running and paused totals.
-- API fetch totals from the E2B response headers when available.
-- Last refreshed time.
+- Quick sandbox rows for expiring, recent, or name-sorted sandboxes, depending on Settings.
+- Optional technical status line with last refreshed time, lifecycle event text, and action messages.
 - Error text when the latest request fails.
-- Usage section with E2B-backed team metrics, labeled trends, and a usage dashboard link.
-- Sandboxes submenu.
+- Compact or detailed usage section with E2B-backed team metrics and a usage dashboard link.
+- All sandboxes submenu.
 - Per-sandbox action menus.
 - Single refresh action for sandbox and usage data.
 - E2B dashboard link.
@@ -61,6 +62,7 @@ The Settings window includes:
 - General: state filter, metadata filter, refresh interval, launch at login, expiration alerts, lifecycle-event polling, destructive-action visibility, refresh, dashboard link.
 - Account: credential status, API key save and clear actions, refresh, dashboard and docs links.
 - Usage: team ID, optional dashboard slug/URL, latest concurrent sandboxes, start rate, max concurrent usage, and max start rate.
+- Menu: first-level sandbox count, sandbox sort, compact/detailed usage display, usage charts, and technical status-line visibility.
 - About: app purpose, version, update check, website, source, API endpoint, storage note, and external links.
 
 ## Requirements
@@ -186,7 +188,7 @@ The inspector shows Copy Log Path and Open Logs actions when a file, process, or
 
 ## Updates
 
-e2b.bar checks GitHub Releases from the menu bar item or the About tab:
+e2b.bar checks GitHub Releases from the About tab:
 
 ```http
 GET https://api.github.com/repos/fabriqaai/e2b-bar/releases/latest
@@ -194,7 +196,7 @@ GET https://api.github.com/repos/fabriqaai/e2b-bar/releases/latest
 
 If a newer tagged release includes an asset named `E2BBar.dmg`, the app can download it, mount the DMG, replace `/Applications/E2BBar.app`, and relaunch. If `/Applications` is not writable, e2b.bar opens the downloaded DMG so you can install it manually.
 
-The updater compares the release tag, such as `v0.5.2`, against the bundled `CFBundleShortVersionString`.
+The updater compares the release tag, such as `v0.5.3`, against the bundled `CFBundleShortVersionString`.
 
 ## Run Locally
 
@@ -266,8 +268,8 @@ Only tagged runs publish a GitHub release. Manual runs still build and upload th
 Create a notarized release:
 
 ```sh
-git tag v0.5.2
-git push origin v0.5.2
+git tag v0.5.3
+git push origin v0.5.3
 ```
 
 The release job does this on `macos-15`:

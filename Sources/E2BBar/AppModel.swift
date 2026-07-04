@@ -49,6 +49,36 @@ final class AppModel: ObservableObject {
             onSnapshotChange?()
         }
     }
+    @Published var menuSandboxLimit: MenuSandboxLimit {
+        didSet {
+            defaults.set(menuSandboxLimit.rawValue, forKey: DefaultsKey.menuSandboxLimit)
+            onSnapshotChange?()
+        }
+    }
+    @Published var menuSandboxSort: MenuSandboxSort {
+        didSet {
+            defaults.set(menuSandboxSort.rawValue, forKey: DefaultsKey.menuSandboxSort)
+            onSnapshotChange?()
+        }
+    }
+    @Published var menuUsageDisplay: MenuUsageDisplay {
+        didSet {
+            defaults.set(menuUsageDisplay.rawValue, forKey: DefaultsKey.menuUsageDisplay)
+            onSnapshotChange?()
+        }
+    }
+    @Published var menuShowUsageCharts: Bool {
+        didSet {
+            defaults.set(menuShowUsageCharts, forKey: DefaultsKey.menuShowUsageCharts)
+            onSnapshotChange?()
+        }
+    }
+    @Published var menuShowTechnicalStatusLine: Bool {
+        didSet {
+            defaults.set(menuShowTechnicalStatusLine, forKey: DefaultsKey.menuShowTechnicalStatusLine)
+            onSnapshotChange?()
+        }
+    }
     @Published var teamID: String {
         didSet {
             defaults.set(teamID, forKey: DefaultsKey.teamID)
@@ -105,6 +135,15 @@ final class AppModel: ObservableObject {
         expirationAlertThreshold = ExpirationAlertThreshold(rawValue: savedThreshold) ?? .off
         destructiveActionsEnabled = defaults.object(forKey: DefaultsKey.destructiveActionsEnabled) as? Bool ?? false
         lifecycleEventsEnabled = defaults.object(forKey: DefaultsKey.lifecycleEventsEnabled) as? Bool ?? true
+        if let rawMenuSandboxLimit = defaults.object(forKey: DefaultsKey.menuSandboxLimit) as? Int {
+            menuSandboxLimit = MenuSandboxLimit(rawValue: rawMenuSandboxLimit) ?? .three
+        } else {
+            menuSandboxLimit = .three
+        }
+        menuSandboxSort = defaults.string(forKey: DefaultsKey.menuSandboxSort).flatMap(MenuSandboxSort.init(rawValue:)) ?? .expiresSoon
+        menuUsageDisplay = defaults.string(forKey: DefaultsKey.menuUsageDisplay).flatMap(MenuUsageDisplay.init(rawValue:)) ?? .compact
+        menuShowUsageCharts = defaults.object(forKey: DefaultsKey.menuShowUsageCharts) as? Bool ?? false
+        menuShowTechnicalStatusLine = defaults.object(forKey: DefaultsKey.menuShowTechnicalStatusLine) as? Bool ?? false
         teamID = defaults.string(forKey: DefaultsKey.teamID) ?? ""
         usageDashboardPath = defaults.string(forKey: DefaultsKey.usageDashboardPath) ?? ""
         latestLifecycleEventID = defaults.string(forKey: DefaultsKey.latestLifecycleEventID)
@@ -727,6 +766,50 @@ enum SandboxStateFilter: String, CaseIterable, Hashable {
     }
 }
 
+enum MenuSandboxLimit: Int, CaseIterable, Hashable {
+    case off = 0
+    case three = 3
+    case five = 5
+    case ten = 10
+
+    var label: String {
+        switch self {
+        case .off: "Off"
+        case .three: "3 sandboxes"
+        case .five: "5 sandboxes"
+        case .ten: "10 sandboxes"
+        }
+    }
+}
+
+enum MenuSandboxSort: String, CaseIterable, Hashable {
+    case expiresSoon
+    case recentlyCreated
+    case name
+
+    var label: String {
+        switch self {
+        case .expiresSoon: "Expires soon"
+        case .recentlyCreated: "Recently created"
+        case .name: "Name"
+        }
+    }
+}
+
+enum MenuUsageDisplay: String, CaseIterable, Hashable {
+    case off
+    case compact
+    case detailed
+
+    var label: String {
+        switch self {
+        case .off: "Off"
+        case .compact: "Compact"
+        case .detailed: "Detailed"
+        }
+    }
+}
+
 enum CredentialState: Equatable {
     case missing
     case configured(source: String)
@@ -766,6 +849,11 @@ enum DefaultsKey {
     static let expirationAlertThreshold = "expirationAlertThreshold"
     static let destructiveActionsEnabled = "destructiveActionsEnabled"
     static let lifecycleEventsEnabled = "lifecycleEventsEnabled"
+    static let menuSandboxLimit = "menuSandboxLimit"
+    static let menuSandboxSort = "menuSandboxSort"
+    static let menuUsageDisplay = "menuUsageDisplay"
+    static let menuShowUsageCharts = "menuShowUsageCharts"
+    static let menuShowTechnicalStatusLine = "menuShowTechnicalStatusLine"
     static let latestLifecycleEventID = "latestLifecycleEventID"
     static let teamID = "teamID"
     static let usageDashboardPath = "usageDashboardPath"

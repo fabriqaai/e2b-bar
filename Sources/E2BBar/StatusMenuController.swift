@@ -191,30 +191,31 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         self.menu.addItem(self.headerItem())
         self.menu.addItem(.separator())
 
+        var hasStatusLine = false
         if let statusLine = self.compactStatusLine() {
             self.menu.addItem(self.disabledItem(statusLine))
+            hasStatusLine = true
         }
         if let error = self.model.snapshot.error {
             self.menu.addItem(self.wrappingDisabledItem("Error: \(error)"))
+            hasStatusLine = true
         }
 
-        self.menu.addItem(.separator())
-        self.menu.addItem(self.usageItem())
-        self.menu.addItem(self.actionItem("Usage Dashboard", action: #selector(self.openUsageDashboard), image: "chart.bar.xaxis"))
+        if hasStatusLine {
+            self.menu.addItem(.separator())
+        }
+        if self.addQuickSandboxItems(to: self.menu) {
+            self.menu.addItem(.separator())
+        }
 
-        self.menu.addItem(.separator())
+        if self.addUsageItems(to: self.menu) {
+            self.menu.addItem(.separator())
+        }
         self.menu.addItem(self.sandboxesItem())
-        self.menu.addItem(self.actionItem("Refresh", action: #selector(self.refreshNow), image: "arrow.clockwise"))
 
         self.menu.addItem(.separator())
+        self.menu.addItem(self.actionItem("Refresh", action: #selector(self.refreshNow), image: "arrow.clockwise"))
         self.menu.addItem(self.actionItem("Open E2B Dashboard", action: #selector(self.openDashboard), image: "arrow.up.right.square"))
-        let updateItem = self.actionItem(
-            self.model.isCheckingForUpdates ? "Checking for Updates..." : "Check for Updates...",
-            action: #selector(self.checkForUpdates),
-            image: "arrow.down.circle"
-        )
-        updateItem.isEnabled = !self.model.isCheckingForUpdates
-        self.menu.addItem(updateItem)
         self.menu.addItem(self.actionItem("Settings...", action: #selector(self.openSettings), image: "gearshape"))
 
         self.menu.addItem(.separator())
@@ -236,10 +237,24 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         return item
     }
 
-    private func usageItem() -> NSMenuItem {
+    @discardableResult
+    private func addUsageItems(to menu: NSMenu) -> Bool {
+        switch self.model.menuUsageDisplay {
+        case .off:
+            return false
+        case .compact:
+            menu.addItem(self.compactUsageItem())
+        case .detailed:
+            menu.addItem(self.usageItem())
+        }
+        menu.addItem(self.actionItem("Usage Dashboard", action: #selector(self.openUsageDashboard), image: "chart.bar.xaxis"))
+        return true
+    }
+
+    private func compactUsageItem() -> NSMenuItem {
         let item = NSMenuItem()
         item.view = MenuItemHostingView(
-            rootView: AnyView(UsageMenuView(
+            rootView: AnyView(CompactUsageMenuView(
                 usage: self.model.teamUsage,
                 usageError: self.model.teamUsageError,
                 hasTeamID: !self.model.teamID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -250,7 +265,24 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         return item
     }
 
+    private func usageItem() -> NSMenuItem {
+        let item = NSMenuItem()
+        item.view = MenuItemHostingView(
+            rootView: AnyView(UsageMenuView(
+                usage: self.model.teamUsage,
+                usageError: self.model.teamUsageError,
+                hasTeamID: !self.model.teamID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                isRefreshing: self.model.isRefreshingTeamUsage,
+                showsCharts: self.model.menuShowUsageCharts
+            ))
+        )
+        item.isEnabled = false
+        return item
+    }
+
     private func compactStatusLine() -> String? {
+        guard self.model.menuShowTechnicalStatusLine else { return nil }
+
         var parts: [String] = []
 
         if let refreshedAt = self.model.snapshot.refreshedAt {
@@ -279,9 +311,85 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         return "\(trimmed.prefix(39))..."
     }
 
+    @discardableResult
+    private func addQuickSandboxItems(to menu: NSMenu) -> Bool {
+        let limit = self.model.menuSandboxLimit.rawValue
+        guard limit > 0 else { return false }
+
+        let sandboxes = self.sortedMenuSandboxes().prefix(limit)
+        guard !sandboxes.isEmpty else { return false }
+
+        menu.addItem(self.disabledItem(self.quickSandboxesTitle(count: sandboxes.count)))
+        for sandbox in sandboxes {
+            menu.addItem(self.firstLevelSandboxItem(for: sandbox))
+        }
+        return true
+    }
+
+    private func quickSandboxesTitle(count: Int) -> String {
+        switch self.model.menuSandboxSort {
+        case .expiresSoon:
+            "Expiring soon"
+        case .recentlyCreated:
+            "Recent sandboxes"
+        case .name:
+            count == 1 ? "Sandbox" : "Sandboxes"
+        }
+    }
+
+    private func sortedMenuSandboxes() -> [E2BSandbox] {
+        self.model.snapshot.sandboxes.sorted { lhs, rhs in
+            switch self.model.menuSandboxSort {
+            case .expiresSoon:
+                let lhsDate = lhs.endAt ?? .distantFuture
+                let rhsDate = rhs.endAt ?? .distantFuture
+                if lhsDate != rhsDate { return lhsDate < rhsDate }
+                return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+            case .recentlyCreated:
+                let lhsDate = lhs.startedAt ?? .distantPast
+                let rhsDate = rhs.startedAt ?? .distantPast
+                if lhsDate != rhsDate { return lhsDate > rhsDate }
+                return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+            case .name:
+                return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+            }
+        }
+    }
+
+    private func firstLevelSandboxItem(for sandbox: E2BSandbox) -> NSMenuItem {
+        let request = SandboxActionRequest(sandboxID: sandbox.sandboxID, sandboxName: sandbox.displayName)
+        let item = NSMenuItem(title: self.firstLevelSandboxTitle(for: sandbox), action: nil, keyEquivalent: "")
+        item.image = NSImage(systemSymbolName: self.iconName(for: sandbox.state), accessibilityDescription: nil)
+        item.toolTip = self.sandboxTooltip(for: sandbox)
+        item.submenu = self.sandboxActionsMenu(for: sandbox, request: request)
+        return item
+    }
+
+    private func firstLevelSandboxTitle(for sandbox: E2BSandbox) -> String {
+        let detail = self.sandboxInlineDetail(for: sandbox)
+        guard !detail.isEmpty else { return sandbox.displayName }
+        return "\(sandbox.displayName)  \(detail)"
+    }
+
+    private func sandboxInlineDetail(for sandbox: E2BSandbox) -> String {
+        var parts = [sandbox.state.label]
+        if let endAt = sandbox.endAt {
+            parts.append("expires \(Self.relative(endAt))")
+        }
+        return parts.joined(separator: " - ")
+    }
+
+    private func sandboxTooltip(for sandbox: E2BSandbox) -> String {
+        var parts = [sandbox.sandboxID, sandbox.resourceSummary]
+        if let metadataSummary = sandbox.metadataSummary {
+            parts.append(metadataSummary)
+        }
+        return parts.joined(separator: "\n")
+    }
+
     private func sandboxesItem() -> NSMenuItem {
         let count = self.model.snapshot.sandboxes.count
-        let title = count > 0 ? "Sandboxes (\(count))" : "Sandboxes"
+        let title = count > 0 ? "All sandboxes (\(count))" : "All sandboxes"
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.image = NSImage(systemSymbolName: "shippingbox", accessibilityDescription: nil)
         let submenu = NSMenu()
@@ -464,6 +572,16 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         item.submenu = submenu
         return item
     }
+
+    private static func relative(_ date: Date) -> String {
+        Self.relativeFormatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter
+    }()
 
     private func disabledItem(_ title: String) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")

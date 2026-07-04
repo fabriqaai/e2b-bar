@@ -18,6 +18,9 @@ struct SettingsView: View {
             UsageSettingsView(model: self.model)
                 .tabItem { Label("Usage", systemImage: "chart.line.uptrend.xyaxis") }
                 .tag(SettingsTab.usage)
+            MenuSettingsView(model: self.model)
+                .tabItem { Label("Menu", systemImage: "menubar.rectangle") }
+                .tag(SettingsTab.menu)
             AboutSettingsView(model: self.model)
                 .tabItem { Label("About", systemImage: "info.circle") }
                 .tag(SettingsTab.about)
@@ -67,25 +70,28 @@ enum SettingsTab: CaseIterable, Hashable {
     case general
     case account
     case usage
+    case menu
     case about
 
     static let defaultWidth: CGFloat = 560
     static let aboutWidth: CGFloat = 640
     static let windowHeight: CGFloat = 470
     static let usageHeight: CGFloat = 570
+    static let menuHeight: CGFloat = 500
 
     var title: String {
         switch self {
         case .general: "General"
         case .account: "Account"
         case .usage: "Usage"
+        case .menu: "Menu"
         case .about: "About"
         }
     }
 
     var preferredWidth: CGFloat {
         switch self {
-        case .about, .usage:
+        case .about, .usage, .menu:
             Self.aboutWidth
         case .general, .account:
             Self.defaultWidth
@@ -96,6 +102,8 @@ enum SettingsTab: CaseIterable, Hashable {
         switch self {
         case .usage:
             Self.usageHeight
+        case .menu:
+            Self.menuHeight
         case .general, .account, .about:
             Self.windowHeight
         }
@@ -296,6 +304,52 @@ private struct UsageSettingsView: View {
     private static func rate(_ value: Double?) -> String {
         guard let value else { return "--" }
         return "\(String(format: "%.2f", value * 60))/min"
+    }
+}
+
+private struct MenuSettingsView: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        Form {
+            Section("First Level Sandboxes") {
+                Picker("Show sandboxes", selection: self.$model.menuSandboxLimit) {
+                    ForEach(MenuSandboxLimit.allCases, id: \.self) { limit in
+                        Text(limit.label).tag(limit)
+                    }
+                }
+                Picker("Sort sandboxes", selection: self.$model.menuSandboxSort) {
+                    ForEach(MenuSandboxSort.allCases, id: \.self) { sort in
+                        Text(sort.label).tag(sort)
+                    }
+                }
+                Text("These sandboxes appear directly in the menu before the All sandboxes submenu.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Usage") {
+                Picker("Usage display", selection: self.$model.menuUsageDisplay) {
+                    ForEach(MenuUsageDisplay.allCases, id: \.self) { display in
+                        Text(display.label).tag(display)
+                    }
+                }
+                Toggle("Show usage charts in detailed mode", isOn: self.$model.menuShowUsageCharts)
+                    .disabled(self.model.menuUsageDisplay != .detailed)
+                Text("Compact shows only live concurrent, peak concurrent, and current start rate. Detailed adds metric tiles; charts stay optional.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Status") {
+                Toggle("Show technical status line", isOn: self.$model.menuShowTechnicalStatusLine)
+                Text("Shows last refresh time, lifecycle event text, and action messages under the header. Leave off for a quieter menu.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .padding(20)
     }
 }
 

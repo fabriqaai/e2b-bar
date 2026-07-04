@@ -5,6 +5,7 @@ struct UsageMenuView: View {
     let usageError: String?
     let hasTeamID: Bool
     let isRefreshing: Bool
+    let showsCharts: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -27,26 +28,30 @@ struct UsageMenuView: View {
                 UsageTile(title: "Peak start rate", value: self.peakStartRate)
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                UsageTrendRow(
-                    title: "Concurrent, 24h",
-                    caption: self.concurrentTrendCaption,
-                    values: self.usage?.concurrentSeries ?? [],
-                    color: Self.concurrentColor
-                )
-                UsageTrendRow(
-                    title: "Starts/min, 24h",
-                    caption: self.startRateTrendCaption,
-                    values: self.usage?.startRateSeries ?? [],
-                    color: Self.startRateColor
-                )
+            if self.showsCharts {
+                VStack(alignment: .leading, spacing: 8) {
+                    UsageTrendRow(
+                        title: "Concurrent, 24h",
+                        caption: self.concurrentTrendCaption,
+                        values: self.usage?.concurrentSeries ?? [],
+                        color: Self.concurrentColor
+                    )
+                    UsageTrendRow(
+                        title: "Starts/min, 24h",
+                        caption: self.startRateTrendCaption,
+                        values: self.usage?.startRateSeries ?? [],
+                        color: Self.startRateColor
+                    )
+                }
             }
 
-            Text(self.footerLine)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
+            if let footerLine {
+                Text(footerLine)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -78,7 +83,7 @@ struct UsageMenuView: View {
         return "\(Self.number(usage.peakStartsPerMinute))/min"
     }
 
-    private var footerLine: String {
+    private var footerLine: String? {
         if !self.hasTeamID {
             return "Add a team ID in Settings to load E2B team metrics."
         }
@@ -89,7 +94,7 @@ struct UsageMenuView: View {
             return "Usage has not been loaded yet."
         }
 
-        return "E2B team metrics · billing and limits live in the dashboard"
+        return nil
     }
 
     private static func number(_ value: Double) -> String {
@@ -114,6 +119,73 @@ struct UsageMenuView: View {
 
     private static let concurrentColor = Color(red: 0.12, green: 0.55, blue: 0.36)
     private static let startRateColor = Color(red: 0.72, green: 0.39, blue: 0.23)
+}
+
+struct CompactUsageMenuView: View {
+    let usage: TeamUsageSummary?
+    let usageError: String?
+    let hasTeamID: Bool
+    let isRefreshing: Bool
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: "chart.bar.xaxis")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(self.hasTeamID ? .green : .secondary)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("Usage")
+                        .font(.callout.weight(.semibold))
+                    Text(self.badgeText)
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(self.hasTeamID ? .green : .secondary)
+                        .padding(.vertical, 2)
+                        .padding(.horizontal, 6)
+                        .background((self.hasTeamID ? Color.green : Color.secondary).opacity(0.14), in: Capsule())
+                }
+                Text(self.summary)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+
+            Spacer(minLength: 8)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .frame(width: 360, alignment: .leading)
+    }
+
+    private var badgeText: String {
+        if self.isRefreshing { return "LIVE" }
+        return self.hasTeamID ? "READY" : "SETUP"
+    }
+
+    private var summary: String {
+        if !self.hasTeamID {
+            return "Add a team ID in Settings"
+        }
+        if let usageError, !usageError.isEmpty {
+            return usageError
+        }
+        guard let usage else {
+            return "Usage has not been loaded yet"
+        }
+        return "\(usage.latestConcurrent) live - peak \(usage.peakConcurrent) - start \(Self.number(usage.latestStartsPerMinute))/min"
+    }
+
+    private static func number(_ value: Double) -> String {
+        if value >= 10 {
+            return String(format: "%.0f", value)
+        }
+        if value >= 1 {
+            return String(format: "%.1f", value)
+        }
+        return String(format: "%.2f", value)
+    }
 }
 
 private struct UsageTile: View {
