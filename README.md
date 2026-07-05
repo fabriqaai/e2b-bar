@@ -20,14 +20,15 @@ Source: https://github.com/fabriqaai/e2b-bar
 - Provides per-sandbox actions for viewing logs, copying logs, copying metrics, extending TTL, setting timeout, pausing, and deleting.
 - Hides destructive Pause and Delete actions unless you enable them in Settings.
 - Opens a logs panel with search, level filtering, refresh, and copy-visible-logs.
-- Opens a sandbox inspector with readable details, a file browser, one-off command runner, process list, and network controls.
+- Can opt in to archive running sandbox logs locally for offline access after pause or termination.
+- Opens a sandbox inspector with readable details, a file browser, one-off command runner, process list, and network controls with common egress presets.
 - Opens or copies common public port URLs for `3000`, `8000`, and `8080`.
 - Uses batch sandbox metrics when possible instead of one metrics request per sandbox.
 - Can use lifecycle events between full refreshes to avoid polling the whole sandbox list every interval.
 - Shows compact or detailed team usage in the menu when you provide a team ID.
 - Shows Live concurrent, start rate, Peak concurrent, and peak start rate; detailed mode can include trends.
 - Opens the correct E2B usage dashboard when you configure your dashboard slug or full usage URL.
-- Checks GitHub Releases for updates and can download/install the latest DMG.
+- Checks GitHub Releases on a configurable interval and can download/install the latest DMG.
 - Can notify you before sandboxes expire.
 - Supports state filters for running, paused, or both.
 - Supports an E2B metadata filter.
@@ -53,6 +54,8 @@ The menu includes:
 - All sandboxes submenu.
 - Per-sandbox action menus.
 - Single refresh action for sandbox and usage data.
+- Saved-log folder link.
+- Update-and-relaunch action when a newer release is available.
 - E2B dashboard link.
 - Settings.
 - Quit.
@@ -63,7 +66,8 @@ The Settings window includes:
 - Account: credential status, API key save and clear actions, refresh, dashboard and docs links.
 - Usage: team ID, optional dashboard slug/URL, latest concurrent sandboxes, start rate, max concurrent usage, and max start rate.
 - Menu: first-level sandbox count, sandbox sort, compact/detailed usage display, usage charts, and technical status-line visibility.
-- About: app purpose, version, update check, website, source, API endpoint, storage note, and external links.
+- Logs: opt-in automatic log archiving, archive folder path, choose/open/reset-folder actions, and manual archive-now action.
+- About: app purpose, version, update checks, automatic update interval, website, source, API endpoint, storage note, and external links.
 
 ## Requirements
 
@@ -186,15 +190,27 @@ Runtime diagnostics are written to:
 
 The inspector shows Copy Log Path and Open Logs actions when a file, process, or network operation fails. Logs include endpoint names, short sandbox IDs, error text, and a short response preview. API keys and sandbox access tokens are redacted before writing.
 
+## Sandbox Log Archive
+
+Automatic sandbox log archiving is opt-in from Settings -> Logs. When enabled, e2b.bar polls running sandboxes on the normal refresh cadence and appends readable logs to one `.log` file per sandbox. Pause and Delete actions also try to archive the latest logs before changing sandbox lifecycle.
+
+The default archive folder is:
+
+```text
+~/.e2b-bar/logs
+```
+
+You can choose a different folder or open the current folder from Settings -> Logs or the menu. App preferences stay in macOS UserDefaults; archived sandbox logs are the only files written to this folder by default.
+
 ## Updates
 
-e2b.bar checks GitHub Releases from the About tab:
+e2b.bar checks GitHub Releases from the About tab and, by default, automatically checks every 10 minutes:
 
 ```http
 GET https://api.github.com/repos/fabriqaai/e2b-bar/releases/latest
 ```
 
-If a newer tagged release includes an asset named `E2BBar.dmg`, the app can download it, mount the DMG, replace `/Applications/E2BBar.app`, and relaunch. If `/Applications` is not writable, e2b.bar opens the downloaded DMG so you can install it manually.
+If a newer tagged release includes an asset named `E2BBar.dmg`, the menu shows an Update & Relaunch action. The app can download the DMG, mount it, replace `/Applications/E2BBar.app`, and relaunch. If `/Applications` is not writable, e2b.bar opens the downloaded DMG so you can install it manually. The automatic check interval can be changed or turned off in Settings -> About.
 
 The updater compares the release tag, such as `v0.5.3`, against the bundled `CFBundleShortVersionString`.
 
@@ -376,7 +392,8 @@ Important Swift files:
 - `E2BClient.swift`: E2B API client.
 - `EnvdClient.swift`: sandbox envd filesystem and process API client.
 - `Models.swift`: sandbox and API response models.
-- `SettingsView.swift`: General, Account, and About settings tabs.
+- `SandboxLogArchiver.swift`: local per-sandbox log archive writer.
+- `SettingsView.swift`: General, Account, Usage, Menu, Logs, and About settings tabs.
 - `SandboxInspectorWindowController.swift`: sandbox detail, files, processes, and network tools.
 - `Keychain.swift`: Keychain persistence.
 - `LaunchAtLoginManager.swift`: launch-at-login integration.
@@ -385,6 +402,7 @@ Important Swift files:
 
 - Do not commit API keys, Apple credentials, Cloudflare tokens, or certificate files.
 - User E2B API keys are saved to macOS Keychain.
+- Automatic sandbox log archiving is off by default and writes only after the user opts in.
 - GitHub Actions secrets are only referenced by name in workflows.
 - The app calls E2B directly from the user's Mac; the landing page does not proxy API requests.
 - Update checks call GitHub directly from the user's Mac and only install from the public `E2BBar.dmg` release asset.
@@ -431,7 +449,7 @@ Check authoritative Cloudflare DNS first. Local resolvers can lag even after Clo
 
 ## Current Scope
 
-e2b.bar is intentionally small. It is meant to be a fast menu bar companion for visibility and light operations, not a full dashboard replacement. The current app lists and filters sandboxes, watches lifecycle events, shows inline batch metrics, opens searchable logs, opens port URLs, shows E2B-backed team usage, browses files, lists/runs/signals processes, edits network rules, copies IDs/logs/metrics, extends TTLs, sets timeouts, optionally pauses and deletes sandboxes, sends expiration alerts, checks for GitHub release updates, opens external surfaces, and keeps credentials local.
+e2b.bar is intentionally small. It is meant to be a fast menu bar companion for visibility and light operations, not a full dashboard replacement. The current app lists and filters sandboxes, watches lifecycle events, shows inline batch metrics, opens searchable logs, optionally archives sandbox logs locally, opens port URLs, shows E2B-backed team usage, browses files, lists/runs/signals processes, edits network rules with common presets, copies IDs/logs/metrics, extends TTLs, sets timeouts, optionally pauses and deletes sandboxes, sends expiration alerts, checks for GitHub release updates, opens external surfaces, and keeps credentials local.
 
 Useful future additions:
 

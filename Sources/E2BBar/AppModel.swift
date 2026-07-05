@@ -97,9 +97,34 @@ final class AppModel: ObservableObject {
     @Published private(set) var isRefreshingTeamUsage = false
     @Published private(set) var lastLifecycleEvent: E2BSandboxEvent?
     @Published private(set) var lifecycleEventsError: String?
+    @Published var logArchivingEnabled: Bool {
+        didSet {
+            defaults.set(logArchivingEnabled, forKey: DefaultsKey.logArchivingEnabled)
+            onSnapshotChange?()
+            if logArchivingEnabled {
+                Task { await archiveRunningSandboxLogs() }
+            }
+        }
+    }
+    @Published var logArchiveDirectoryPath: String {
+        didSet { defaults.set(logArchiveDirectoryPath, forKey: DefaultsKey.logArchiveDirectoryPath) }
+    }
+    @Published private(set) var isArchivingLogs = false
+    @Published private(set) var logArchiveMessage: String?
+    @Published var updateCheckInterval: UpdateCheckInterval {
+        didSet {
+            defaults.set(updateCheckInterval.rawValue, forKey: DefaultsKey.updateCheckInterval)
+            onUpdateCheckIntervalChange?(updateCheckInterval.seconds)
+        }
+    }
+    @Published private(set) var availableUpdate: UpdateCandidate?
+    @Published private(set) var lastUpdateCheckAt: Date?
+    @Published private(set) var updateCheckError: String?
+    @Published private(set) var isInstallingUpdate = false
 
     var onSnapshotChange: (() -> Void)?
     var onPollIntervalChange: ((TimeInterval) -> Void)?
+    var onUpdateCheckIntervalChange: ((TimeInterval?) -> Void)?
 
     private let defaults = UserDefaults.standard
     private let keychain = Keychain(service: "com.hancengiz.e2bbar")
@@ -146,6 +171,13 @@ final class AppModel: ObservableObject {
         menuShowTechnicalStatusLine = defaults.object(forKey: DefaultsKey.menuShowTechnicalStatusLine) as? Bool ?? false
         teamID = defaults.string(forKey: DefaultsKey.teamID) ?? ""
         usageDashboardPath = defaults.string(forKey: DefaultsKey.usageDashboardPath) ?? ""
+        logArchivingEnabled = defaults.object(forKey: DefaultsKey.logArchivingEnabled) as? Bool ?? false
+        logArchiveDirectoryPath = defaults.string(forKey: DefaultsKey.logArchiveDirectoryPath) ?? Self.defaultLogArchiveDirectoryPath
+        if let savedUpdateCheckInterval = defaults.object(forKey: DefaultsKey.updateCheckInterval) as? TimeInterval {
+            updateCheckInterval = UpdateCheckInterval(rawValue: savedUpdateCheckInterval) ?? .tenMinutes
+        } else {
+            updateCheckInterval = .tenMinutes
+        }
         latestLifecycleEventID = defaults.string(forKey: DefaultsKey.latestLifecycleEventID)
         updateLaunchAtLogin(enabled: launchAtLoginEnabled)
         reloadCredentialState()
@@ -184,6 +216,7 @@ final class AppModel: ObservableObject {
             ))
             await captureLifecycleBaseline(client: client)
             await notifyExpiringSandboxes(sortedSandboxes)
+            await archiveRunningSandboxLogs(client: client)
         } catch {
             apply(snapshot.with(error: Self.errorMessage(error)))
         }
@@ -197,6 +230,7 @@ final class AppModel: ObservableObject {
 
         do {
             let client = try currentClient()
+            await archiveRunningSandboxLogs(client: client)
             let events = try await client.listSandboxEvents(types: Self.lifecycleEventTypes)
             lifecycleEventsError = nil
             guard let newest = events.first else {
@@ -355,6 +389,44 @@ final class AppModel: ObservableObject {
         await refreshTeamUsage()
     }
 
+    func archiveRunningSandboxLogs() async {
+        do {
+            try await archiveRunningSandboxLogs(client: currentClient())
+        } catch {
+            logArchiveMessage = "Log archive: \(Self.errorMessage(error))"
+            onSnapshotChange?()
+        }
+    }
+
+    func chooseLogArchiveDirectory() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose Log Archive Folder"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.directoryURL = Self.directoryURL(from: logArchiveDirectoryPath)
+        NSApp.activate(ignoringOtherApps: true)
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        logArchiveDirectoryPath = url.path
+    }
+
+    func openLogArchiveDirectory() {
+        let url = Self.directoryURL(from: logArchiveDirectoryPath)
+        do {
+            try SandboxLogArchiver(directory: url).ensureDirectory()
+            NSWorkspace.shared.open(url)
+        } catch {
+            logArchiveMessage = "Log folder: \(Self.errorMessage(error))"
+            onSnapshotChange?()
+        }
+    }
+
+    func resetLogArchiveDirectory() {
+        logArchiveDirectoryPath = Self.defaultLogArchiveDirectoryPath
+    }
+
     func checkForUpdates() async {
         guard !isCheckingForUpdates else { return }
         setCheckingForUpdates(true)
@@ -362,22 +434,17 @@ final class AppModel: ObservableObject {
 
         do {
             let result = try await updater.checkForUpdate(currentVersion: Self.currentAppVersion)
+            lastUpdateCheckAt = Date()
+            updateCheckError = nil
             switch result {
             case .upToDate(let currentVersion, _):
+                availableUpdate = nil
                 setActionMessage("e2b.bar is up to date (\(currentVersion))")
             case .available(let update):
+                availableUpdate = update
                 switch promptForUpdate(update) {
                 case .install:
-                    setActionMessage("Downloading e2b.bar \(update.release.versionString)...")
-                    let installResult = try await updater.downloadAndInstall(update)
-                    switch installResult {
-                    case .scheduledRelaunch(let version):
-                        setActionMessage("Installing e2b.bar \(version) and relaunching")
-                        NSApp.terminate(nil)
-                    case .manual(let dmgURL, let reason):
-                        NSWorkspace.shared.open(dmgURL)
-                        setActionMessage("Downloaded update; install manually from the DMG (\(reason))")
-                    }
+                    await installUpdate(update)
                 case .releaseNotes:
                     NSWorkspace.shared.open(update.release.htmlURL)
                     setActionMessage("Opened release notes for e2b.bar \(update.release.versionString)")
@@ -386,7 +453,39 @@ final class AppModel: ObservableObject {
                 }
             }
         } catch {
+            updateCheckError = Self.errorMessage(error)
             apply(snapshot.with(error: "Update check: \(Self.errorMessage(error))"))
+        }
+    }
+
+    func automaticUpdateCheck() async {
+        guard updateCheckInterval.seconds != nil, !isCheckingForUpdates, !isInstallingUpdate else { return }
+        setCheckingForUpdates(true)
+        defer { setCheckingForUpdates(false) }
+
+        do {
+            let result = try await updater.checkForUpdate(currentVersion: Self.currentAppVersion)
+            lastUpdateCheckAt = Date()
+            updateCheckError = nil
+            switch result {
+            case .upToDate:
+                availableUpdate = nil
+            case .available(let update):
+                availableUpdate = update
+                setActionMessage("Update \(update.release.versionString) is available")
+            }
+            onSnapshotChange?()
+        } catch {
+            updateCheckError = Self.errorMessage(error)
+            onSnapshotChange?()
+        }
+    }
+
+    func installAvailableUpdate() async {
+        if let availableUpdate {
+            await installUpdate(availableUpdate)
+        } else {
+            await checkForUpdates()
         }
     }
 
@@ -456,6 +555,7 @@ final class AppModel: ObservableObject {
     func pauseSandbox(_ sandboxID: String) async {
         do {
             let client = try currentClient()
+            await archiveLogsBeforeLifecycleChange(sandboxID: sandboxID, client: client)
             try await client.pauseSandbox(sandboxID: sandboxID, memory: true)
             setActionMessage("Paused \(shortID(sandboxID))")
             await refresh()
@@ -467,6 +567,7 @@ final class AppModel: ObservableObject {
     func deleteSandbox(_ sandboxID: String) async {
         do {
             let client = try currentClient()
+            await archiveLogsBeforeLifecycleChange(sandboxID: sandboxID, client: client)
             try await client.deleteSandbox(sandboxID: sandboxID)
             setActionMessage("Deleted \(shortID(sandboxID))")
             await refresh()
@@ -529,6 +630,62 @@ final class AppModel: ObservableObject {
         return summaries
     }
 
+    private func archiveRunningSandboxLogs(client: E2BClient) async {
+        guard logArchivingEnabled, !isArchivingLogs else { return }
+        isArchivingLogs = true
+        defer { isArchivingLogs = false }
+
+        do {
+            let running = try await client.listSandboxes(states: [.running], metadata: nil, limit: 100)
+            let results = try await archiveLogs(for: running.sandboxes, client: client)
+            let appended = results.reduce(0) { $0 + $1.appendedCount }
+            logArchiveMessage = "Archived \(appended) new log lines from \(results.count) running sandboxes"
+            onSnapshotChange?()
+        } catch {
+            logArchiveMessage = "Log archive: \(Self.errorMessage(error))"
+            onSnapshotChange?()
+        }
+    }
+
+    private func archiveLogsBeforeLifecycleChange(
+        sandboxID: String,
+        client: E2BClient
+    ) async {
+        guard logArchivingEnabled,
+              let sandbox = snapshot.sandboxes.first(where: { $0.sandboxID == sandboxID })
+        else {
+            return
+        }
+
+        do {
+            let results = try await archiveLogs(for: [sandbox], client: client)
+            if let result = results.first {
+                logArchiveMessage = "Archived \(result.appendedCount) log lines before changing \(shortID(sandboxID))"
+                onSnapshotChange?()
+            }
+        } catch {
+            logArchiveMessage = "Log archive before lifecycle change: \(Self.errorMessage(error))"
+            onSnapshotChange?()
+        }
+    }
+
+    private func archiveLogs(
+        for sandboxes: [E2BSandbox],
+        client: E2BClient
+    ) async throws -> [SandboxLogArchiveResult] {
+        guard !sandboxes.isEmpty else { return [] }
+        let archiver = SandboxLogArchiver(directory: Self.directoryURL(from: logArchiveDirectoryPath))
+        var results: [SandboxLogArchiveResult] = []
+
+        for sandbox in sandboxes {
+            let logs = try await client.getSandboxLogs(sandboxID: sandbox.sandboxID, limit: 1000)
+            let result = try archiver.archive(sandbox: sandbox, logs: logs)
+            results.append(result)
+        }
+
+        return results
+    }
+
     private func captureLifecycleBaseline(client: E2BClient) async {
         guard lifecycleEventsEnabled else { return }
         do {
@@ -571,6 +728,31 @@ final class AppModel: ObservableObject {
                 remaining: remaining,
                 threshold: expirationAlertThreshold
             )
+        }
+    }
+
+    private func installUpdate(_ update: UpdateCandidate) async {
+        guard !isInstallingUpdate else { return }
+        isInstallingUpdate = true
+        onSnapshotChange?()
+        defer {
+            isInstallingUpdate = false
+            onSnapshotChange?()
+        }
+
+        do {
+            setActionMessage("Downloading e2b.bar \(update.release.versionString)...")
+            let installResult = try await updater.downloadAndInstall(update)
+            switch installResult {
+            case .scheduledRelaunch(let version):
+                setActionMessage("Installing e2b.bar \(version) and relaunching")
+                NSApp.terminate(nil)
+            case .manual(let dmgURL, let reason):
+                NSWorkspace.shared.open(dmgURL)
+                setActionMessage("Downloaded update; install manually from the DMG (\(reason))")
+            }
+        } catch {
+            apply(snapshot.with(error: "Install update: \(Self.errorMessage(error))"))
         }
     }
 
@@ -672,6 +854,25 @@ final class AppModel: ObservableObject {
         return suffix.allSatisfy { character in
             character.isHexDigit
         }
+    }
+
+    private static var defaultLogArchiveDirectoryPath: String {
+        SandboxLogArchiver.defaultDirectoryURL.path
+    }
+
+    private static func directoryURL(from path: String) -> URL {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return SandboxLogArchiver.defaultDirectoryURL
+        }
+
+        let expanded = NSString(string: trimmed).expandingTildeInPath
+        if expanded.hasPrefix("/") {
+            return URL(fileURLWithPath: expanded, isDirectory: true)
+        }
+
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(expanded, isDirectory: true)
     }
 
     private static var currentAppVersion: String {
@@ -810,6 +1011,28 @@ enum MenuUsageDisplay: String, CaseIterable, Hashable {
     }
 }
 
+enum UpdateCheckInterval: TimeInterval, CaseIterable, Hashable {
+    case off = 0
+    case tenMinutes = 600
+    case thirtyMinutes = 1800
+    case oneHour = 3600
+    case sixHours = 21600
+
+    var label: String {
+        switch self {
+        case .off: "Off"
+        case .tenMinutes: "10 minutes"
+        case .thirtyMinutes: "30 minutes"
+        case .oneHour: "1 hour"
+        case .sixHours: "6 hours"
+        }
+    }
+
+    var seconds: TimeInterval? {
+        self == .off ? nil : rawValue
+    }
+}
+
 enum CredentialState: Equatable {
     case missing
     case configured(source: String)
@@ -857,6 +1080,9 @@ enum DefaultsKey {
     static let latestLifecycleEventID = "latestLifecycleEventID"
     static let teamID = "teamID"
     static let usageDashboardPath = "usageDashboardPath"
+    static let logArchivingEnabled = "logArchivingEnabled"
+    static let logArchiveDirectoryPath = "logArchiveDirectoryPath"
+    static let updateCheckInterval = "updateCheckInterval"
 }
 
 enum KeychainAccount {
