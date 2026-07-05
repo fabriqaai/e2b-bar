@@ -25,6 +25,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private let menu = NSMenu()
     private var timer: Timer?
+    private var updateTimer: Timer?
 
     init(model: AppModel, statusBar: NSStatusBar = .system) {
         self.model = model
@@ -49,16 +50,23 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         self.model.onPollIntervalChange = { [weak self] interval in
             self?.scheduleTimer(interval: interval)
         }
+        self.model.onUpdateCheckIntervalChange = { [weak self] interval in
+            self?.scheduleUpdateTimer(interval: interval)
+        }
 
         self.rebuildMenu()
         self.applyStatusItemAppearance()
         self.scheduleTimer(interval: self.model.pollInterval)
+        self.scheduleUpdateTimer(interval: self.model.updateCheckInterval.seconds)
         Task { await self.model.refresh() }
+        Task { await self.model.automaticUpdateCheck() }
     }
 
     func stop() {
         self.timer?.invalidate()
         self.timer = nil
+        self.updateTimer?.invalidate()
+        self.updateTimer = nil
         if let statusItem {
             statusItem.menu = nil
             statusItem.button?.image = nil
@@ -93,6 +101,11 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     @objc private func openSettings() {
         SettingsOpener.shared.open()
+    }
+
+    @objc private func openLogArchiveDirectory() {
+        self.model.openLogArchiveDirectory()
+        self.menu.cancelTracking()
     }
 
     @objc private func openDashboard() {
@@ -182,6 +195,11 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         self.menu.cancelTracking()
     }
 
+    @objc private func installAvailableUpdate() {
+        Task { await self.model.installAvailableUpdate() }
+        self.menu.cancelTracking()
+    }
+
     @objc private func quit() {
         NSApp.terminate(nil)
     }
@@ -214,8 +232,19 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         self.menu.addItem(self.sandboxesItem())
 
         self.menu.addItem(.separator())
+        if let update = self.model.availableUpdate {
+            let title = self.model.isInstallingUpdate
+                ? "Installing e2b.bar \(update.release.versionString)..."
+                : "Update & Relaunch to \(update.release.versionString)"
+            let item = self.actionItem(title, action: #selector(self.installAvailableUpdate), image: "arrow.down.circle")
+            item.isEnabled = !self.model.isInstallingUpdate
+            self.menu.addItem(item)
+        } else if self.model.isCheckingForUpdates {
+            self.menu.addItem(self.disabledItem("Checking for updates..."))
+        }
         self.menu.addItem(self.actionItem("Refresh", action: #selector(self.refreshNow), image: "arrow.clockwise"))
         self.menu.addItem(self.actionItem("Open E2B Dashboard", action: #selector(self.openDashboard), image: "arrow.up.right.square"))
+        self.menu.addItem(self.actionItem("Open Saved Logs", action: #selector(self.openLogArchiveDirectory), image: "folder"))
         self.menu.addItem(self.actionItem("Settings...", action: #selector(self.openSettings), image: "gearshape"))
 
         self.menu.addItem(.separator())
@@ -637,6 +666,20 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
                 await self?.model.scheduledRefresh()
             }
         }
+    }
+
+    private func scheduleUpdateTimer(interval: TimeInterval?) {
+        self.updateTimer?.invalidate()
+        self.updateTimer = nil
+        guard let interval, interval > 0 else { return }
+
+        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                await self?.model.automaticUpdateCheck()
+            }
+        }
+        timer.tolerance = min(interval * 0.1, 60)
+        self.updateTimer = timer
     }
 
     private func confirmDeleteSandbox(_ request: SandboxActionRequest) -> Bool {

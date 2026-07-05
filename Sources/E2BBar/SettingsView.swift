@@ -21,6 +21,9 @@ struct SettingsView: View {
             MenuSettingsView(model: self.model)
                 .tabItem { Label("Menu", systemImage: "menubar.rectangle") }
                 .tag(SettingsTab.menu)
+            LogArchiveSettingsView(model: self.model)
+                .tabItem { Label("Logs", systemImage: "doc.text") }
+                .tag(SettingsTab.logs)
             AboutSettingsView(model: self.model)
                 .tabItem { Label("About", systemImage: "info.circle") }
                 .tag(SettingsTab.about)
@@ -71,6 +74,7 @@ enum SettingsTab: CaseIterable, Hashable {
     case account
     case usage
     case menu
+    case logs
     case about
 
     static let defaultWidth: CGFloat = 560
@@ -78,6 +82,8 @@ enum SettingsTab: CaseIterable, Hashable {
     static let windowHeight: CGFloat = 470
     static let usageHeight: CGFloat = 570
     static let menuHeight: CGFloat = 500
+    static let logsHeight: CGFloat = 500
+    static let aboutHeight: CGFloat = 560
 
     var title: String {
         switch self {
@@ -85,13 +91,14 @@ enum SettingsTab: CaseIterable, Hashable {
         case .account: "Account"
         case .usage: "Usage"
         case .menu: "Menu"
+        case .logs: "Logs"
         case .about: "About"
         }
     }
 
     var preferredWidth: CGFloat {
         switch self {
-        case .about, .usage, .menu:
+        case .about, .usage, .menu, .logs:
             Self.aboutWidth
         case .general, .account:
             Self.defaultWidth
@@ -102,9 +109,13 @@ enum SettingsTab: CaseIterable, Hashable {
         switch self {
         case .usage:
             Self.usageHeight
+        case .logs:
+            Self.logsHeight
         case .menu:
             Self.menuHeight
-        case .general, .account, .about:
+        case .about:
+            Self.aboutHeight
+        case .general, .account:
             Self.windowHeight
         }
     }
@@ -353,6 +364,59 @@ private struct MenuSettingsView: View {
     }
 }
 
+private struct LogArchiveSettingsView: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        Form {
+            Section("Automatic Archive") {
+                Toggle("Save running sandbox logs locally", isOn: self.$model.logArchivingEnabled)
+                Text("When enabled, e2b.bar polls running sandboxes and appends readable logs to one file per sandbox. Logs remain available after a sandbox is paused or terminated.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Folder") {
+                TextField("Archive folder", text: self.$model.logArchiveDirectoryPath)
+                    .font(.system(.body, design: .monospaced))
+                HStack {
+                    Button("Choose...") {
+                        self.model.chooseLogArchiveDirectory()
+                    }
+                    Button("Open Folder") {
+                        self.model.openLogArchiveDirectory()
+                    }
+                    Button("Reset Default") {
+                        self.model.resetLogArchiveDirectory()
+                    }
+                }
+                Text("Default: ~/.e2b-bar/logs. App preferences stay in macOS UserDefaults; only archived sandbox log files are written here.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Actions") {
+                HStack {
+                    Button(self.model.isArchivingLogs ? "Archiving..." : "Archive Running Logs Now") {
+                        Task { await self.model.archiveRunningSandboxLogs() }
+                    }
+                    .disabled(!self.model.logArchivingEnabled || self.model.isArchivingLogs)
+                    Button("Open Saved Logs") {
+                        self.model.openLogArchiveDirectory()
+                    }
+                }
+                if let message = self.model.logArchiveMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .padding(20)
+    }
+}
+
 private struct AboutSettingsView: View {
     @ObservedObject var model: AppModel
 
@@ -397,6 +461,38 @@ private struct AboutSettingsView: View {
                 }
             }
             .font(.callout)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Updates")
+                    .font(.headline)
+                Picker("Automatic checks", selection: self.$model.updateCheckInterval) {
+                    ForEach(UpdateCheckInterval.allCases, id: \.self) { interval in
+                        Text(interval.label).tag(interval)
+                    }
+                }
+                .pickerStyle(.menu)
+                if let update = self.model.availableUpdate {
+                    HStack {
+                        Text("e2b.bar \(update.release.versionString) is available.")
+                            .foregroundStyle(.secondary)
+                        Button(self.model.isInstallingUpdate ? "Installing..." : "Update & Relaunch") {
+                            Task { await self.model.installAvailableUpdate() }
+                        }
+                        .disabled(self.model.isInstallingUpdate)
+                    }
+                    .font(.callout)
+                } else if let error = self.model.updateCheckError {
+                    Text("Last update check failed: \(error)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if let checkedAt = self.model.lastUpdateCheckAt {
+                    Text("Last checked \(checkedAt.formatted(date: .omitted, time: .shortened)).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
 
             HStack {
                 Button("Website") {

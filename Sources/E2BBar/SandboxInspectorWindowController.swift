@@ -1,6 +1,24 @@
 import AppKit
 import SwiftUI
 
+struct SandboxNetworkPreset: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let summary: String
+    let allowInternetAccess: Bool
+    let allowOut: [String]
+    let denyOut: [String]
+    let systemImage: String
+
+    var allowOutText: String {
+        allowOut.joined(separator: "\n")
+    }
+
+    var denyOutText: String {
+        denyOut.joined(separator: "\n")
+    }
+}
+
 @MainActor
 final class SandboxInspectorWindowController: NSObject {
     static let shared = SandboxInspectorWindowController()
@@ -75,6 +93,73 @@ final class SandboxInspectorViewModel: ObservableObject {
     @Published private(set) var networkMessage: String?
     @Published private(set) var isApplyingNetwork = false
 
+    static let networkPresets: [SandboxNetworkPreset] = [
+        SandboxNetworkPreset(
+            id: "open-internet",
+            title: "Open Internet",
+            summary: "Clears custom egress filters and lets the sandbox reach the public internet.",
+            allowInternetAccess: true,
+            allowOut: [],
+            denyOut: [],
+            systemImage: "globe"
+        ),
+        SandboxNetworkPreset(
+            id: "public-no-private",
+            title: "Public Only",
+            summary: "Allows internet egress while blocking loopback, link-local, and private network ranges.",
+            allowInternetAccess: true,
+            allowOut: [],
+            denyOut: [
+                "127.0.0.0/8",
+                "10.0.0.0/8",
+                "172.16.0.0/12",
+                "192.168.0.0/16",
+                "169.254.0.0/16"
+            ],
+            systemImage: "lock.shield"
+        ),
+        SandboxNetworkPreset(
+            id: "offline",
+            title: "Offline",
+            summary: "Blocks outbound internet access. E2B treats this like denying 0.0.0.0/0.",
+            allowInternetAccess: false,
+            allowOut: [],
+            denyOut: ["0.0.0.0/0"],
+            systemImage: "wifi.slash"
+        ),
+        SandboxNetworkPreset(
+            id: "ai-apis",
+            title: "AI APIs",
+            summary: "Allows common model APIs and denies other outbound destinations.",
+            allowInternetAccess: true,
+            allowOut: [
+                "api.openai.com",
+                "api.anthropic.com",
+                "generativelanguage.googleapis.com",
+                "api.groq.com"
+            ],
+            denyOut: ["0.0.0.0/0"],
+            systemImage: "brain.head.profile"
+        ),
+        SandboxNetworkPreset(
+            id: "code-deps",
+            title: "Code Deps",
+            summary: "Allows common GitHub, npm, and PyPI hosts for installs while denying other egress.",
+            allowInternetAccess: true,
+            allowOut: [
+                "github.com",
+                "*.github.com",
+                "raw.githubusercontent.com",
+                "objects.githubusercontent.com",
+                "registry.npmjs.org",
+                "pypi.org",
+                "files.pythonhosted.org"
+            ],
+            denyOut: ["0.0.0.0/0"],
+            systemImage: "shippingbox"
+        )
+    ]
+
     let sandboxID: String
     let sandboxName: String
 
@@ -96,6 +181,10 @@ final class SandboxInspectorViewModel: ObservableObject {
 
     var destructiveActionsEnabled: Bool {
         destructiveActionsProvider()
+    }
+
+    var networkPresets: [SandboxNetworkPreset] {
+        Self.networkPresets
     }
 
     var selectedFile: FileEntryInfo? {
@@ -339,7 +428,21 @@ final class SandboxInspectorViewModel: ObservableObject {
         }
     }
 
-    func applyNetwork() async {
+    func loadNetworkPreset(_ preset: SandboxNetworkPreset) {
+        allowInternetAccess = preset.allowInternetAccess
+        allowOutText = preset.allowOutText
+        denyOutText = preset.denyOutText
+        networkMessage = "Loaded \(preset.title). Review the rules, then apply network changes."
+    }
+
+    func applyNetworkPreset(_ preset: SandboxNetworkPreset) async {
+        allowInternetAccess = preset.allowInternetAccess
+        allowOutText = preset.allowOutText
+        denyOutText = preset.denyOutText
+        await applyNetwork(successMessage: "Applied \(preset.title)")
+    }
+
+    func applyNetwork(successMessage: String = "Updated network") async {
         guard destructiveActionsEnabled else {
             networkMessage = "Enable destructive actions in Settings first"
             return
@@ -358,7 +461,7 @@ final class SandboxInspectorViewModel: ObservableObject {
                 allowInternetAccess: allowInternetAccess
             )
             try await self.apiClient().updateSandboxNetwork(sandboxID: sandboxID, update: update)
-            networkMessage = "Updated network"
+            networkMessage = successMessage
             await refreshDetail()
         } catch {
             networkMessage = Self.errorMessage(error)
@@ -899,6 +1002,20 @@ private struct NetworkTab: View {
                 LabeledContent("Public traffic", value: self.viewModel.sandbox?.network?.allowPublicTraffic == true ? "Yes" : "No")
             }
 
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Presets")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 10) {
+                        ForEach(self.viewModel.networkPresets) { preset in
+                            NetworkPresetCard(preset: preset, viewModel: self.viewModel)
+                        }
+                    }
+                    .padding(.bottom, 2)
+                }
+            }
+
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Allow egress")
@@ -943,5 +1060,54 @@ private struct NetworkTab: View {
             Spacer()
         }
         .padding(18)
+    }
+}
+
+private struct NetworkPresetCard: View {
+    let preset: SandboxNetworkPreset
+    @ObservedObject var viewModel: SandboxInspectorViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: preset.systemImage)
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 16)
+                Text(preset.title)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            Text(preset.summary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Button {
+                    self.viewModel.loadNetworkPreset(preset)
+                } label: {
+                    Label("Load", systemImage: "square.and.pencil")
+                }
+                .disabled(self.viewModel.isApplyingNetwork)
+
+                Button {
+                    Task { await self.viewModel.applyNetworkPreset(preset) }
+                } label: {
+                    Label("Apply", systemImage: "checkmark.circle")
+                }
+                .disabled(!self.viewModel.destructiveActionsEnabled || self.viewModel.isApplyingNetwork)
+            }
+            .labelStyle(.titleAndIcon)
+            .controlSize(.small)
+        }
+        .frame(width: 226, alignment: .topLeading)
+        .frame(minHeight: 118, alignment: .topLeading)
+        .padding(10)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+        .overlay {
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.secondary.opacity(0.18))
+        }
     }
 }
